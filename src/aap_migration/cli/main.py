@@ -17,6 +17,7 @@ from aap_migration.cli.commands import classify_failures as classify_failures_co
 from aap_migration.cli.commands import cleanup as cleanup_commands
 from aap_migration.cli.commands import config as config_commands
 from aap_migration.cli.commands import credentials as credentials_commands
+from aap_migration.cli.commands import dashboard as dashboard_commands
 from aap_migration.cli.commands import export_import
 from aap_migration.cli.commands import iam as iam_commands
 from aap_migration.cli.commands import migrate as migrate_commands
@@ -150,6 +151,7 @@ cli.add_command(migration_report_v2_commands.generate_enhanced_report)
 cli.add_command(premigration_report_commands.generate_premigration_report)
 cli.add_command(classify_failures_commands.classify_failures_cmd)
 cli.add_command(remediate_commands.remediate)
+cli.add_command(dashboard_commands.dashboard)
 
 
 def main() -> int:

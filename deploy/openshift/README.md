@@ -10,6 +10,7 @@ This kustomize base runs the migration engine in namespace `demojam-copilot`. It
 | ConfigMap `copilot-config` | Generated from `config.yaml`, which is a copy of `config/config.yaml`. Mounted at `/app/config`. |
 | `job-premigration.yaml` | `aap-migrate premigration-report --source live`. Reads the AAP 2.4 source only. |
 | `job-migrate.yaml` | `aap-migrate migrate`: the full prep → export → transform → import run. |
+| `dashboard.yaml` | `aap-migrate dashboard`: Deployment, Service and Route (C11). Mounts the PVC read-only. |
 | `secret.example.yaml` | Placeholders only. Not applied. |
 
 Both Jobs are created **suspended**, because the image doesn't exist until the build finishes. You start them by unsuspending them (step 5).
@@ -112,7 +113,23 @@ oc delete pod copilot-files -n demojam-copilot
 
 `/app/state/migration_state.db` is in the same volume if you need it, for example for `classify-failures`.
 
-## 7. Re-run a Job
+## 7. Live dashboard (source vs target counts)
+
+`oc apply -k` also creates the `copilot-dashboard` Deployment, Service and Route. It reads the PVC read-only and the AAP 2.6 target through GET calls only. If it started before the image existed, restart it after the build:
+
+```bash
+oc rollout restart deployment/copilot-dashboard -n demojam-copilot
+oc rollout status deployment/copilot-dashboard -n demojam-copilot
+echo "https://$(oc get route copilot-dashboard -n demojam-copilot -o jsonpath='{.spec.host}')/"
+```
+
+The PVC is ReadWriteOnce, so the dashboard pod must run on the same node as the Job using the PVC. The Deployment asks for that with a preferred pod affinity. If the pod is stuck on `Multi-Attach`, delete it while the Job runs so it is rescheduled next to the Job:
+
+```bash
+oc delete pod -l app.kubernetes.io/component=dashboard -n demojam-copilot
+```
+
+## 8. Re-run a Job
 
 Delete the Job and apply the base again. That recreates the Job suspended, so then unsuspend it as in step 5.
 

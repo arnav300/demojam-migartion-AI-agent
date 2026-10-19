@@ -14,10 +14,11 @@ resources:
   - buildconfig.yaml
   - job-premigration.yaml
   - job-migrate.yaml
+  - dashboard.yaml
   # secret.example.yaml is intentionally not listed: create the Secret with `oc create secret`.
 
 # config.yaml is a copy of ../../config/config.yaml (kustomize cannot read files
-# outside this directory). tests/unit/deploy/test_openshift_config.py keeps them in sync.
+# outside this directory). tests/unit/deploy/test_openshift_manifests.py keeps them in sync.
 configMapGenerator:
   - name: copilot-config
     files:

@@ -84,7 +84,7 @@ class ClassificationResult:
         }
 
 
-def _database_url(db: str | Path) -> str:
+def read_only_database_url(db: str | Path) -> str:
     """Accept a SQLAlchemy URL or a SQLite file path; open SQLite files read-only."""
     value = str(db)
     if "://" not in value:
@@ -99,7 +99,7 @@ def _database_url(db: str | Path) -> str:
 
 def load_failed_rows(db: str | Path) -> list[FailedResource]:
     """Failed rows with an error message, ordered by type and source id."""
-    engine = create_engine(_database_url(db))
+    engine = create_engine(read_only_database_url(db))
     try:
         with Session(engine) as session:
             rows = session.execute(
