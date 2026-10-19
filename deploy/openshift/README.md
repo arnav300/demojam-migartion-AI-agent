@@ -9,6 +9,7 @@ This kustomize base runs the migration engine in namespace `demojam-copilot`. It
 | `imagestream.yaml`, `buildconfig.yaml` | Build the image `copilot:latest` in the cluster from this repo's `Containerfile` (branch `demojam/migration-agent`). |
 | ConfigMap `copilot-config` | Generated from `config.yaml`, which is a copy of `config/config.yaml`. Mounted at `/app/config`. |
 | `job-premigration.yaml` | `aap-migrate premigration-report --source live`. Reads the AAP 2.4 source only. |
+| `job-postmigration.yaml` | After `migrate`: `classify-failures` → `prediction-check` → `remediate` → `enhanced-report`, all written to the PVC (`/app/state/reports`, `/app/state/remediation`). |
 | `job-migrate.yaml` | `aap-migrate migrate`: the full prep → export → transform → import run. |
 | `dashboard.yaml` | `aap-migrate dashboard`: Deployment, Service and Route (C11). Mounts the PVC read-only. |
 | `secret.example.yaml` | Placeholders only. Not applied. |
@@ -33,7 +34,8 @@ oc create secret generic copilot-secrets -n demojam-copilot \
   --from-literal=AAP_TARGET_TOKEN='<aap26-token>' \
   --from-literal=AI_ENDPOINT='<granite-url>' \
   --from-literal=AI_MODEL='<model-id>' \
-  --from-literal=AI_TOKEN='<granite-token>'
+  --from-literal=AI_TOKEN='<granite-token>' \
+  --from-literal=AI_VERIFY_SSL='false'      # only if the Granite URL has a self-signed certificate
 ```
 
 - **URL format:** the URLs must include the API path, as in `.env.example`.
@@ -78,6 +80,13 @@ oc logs -f job/copilot-migrate -n demojam-copilot
 oc wait --for=condition=complete job/copilot-migrate -n demojam-copilot --timeout=6h
 ```
 
+After the migration (classification, predicted vs actual, remediation, enhanced report):
+
+```bash
+oc patch job copilot-postmigration -n demojam-copilot --type=merge -p '{"spec":{"suspend":false}}'
+oc logs -f job/copilot-postmigration -n demojam-copilot
+```
+
 The PVC is ReadWriteOnce, so run one Job at a time. If a Job fails, check `oc describe job/<name>`. `backoffLimit` is 0, so a failed Job is not retried.
 
 ## 6. Copy the reports off the PVC
@@ -108,6 +117,7 @@ EOF
 oc wait --for=condition=Ready pod/copilot-files -n demojam-copilot --timeout=5m
 oc rsync -n demojam-copilot copilot-files:/app/state/reports ./copilot-reports
 oc rsync -n demojam-copilot copilot-files:/app/state/logs ./copilot-reports
+oc rsync -n demojam-copilot copilot-files:/app/state/remediation ./copilot-reports
 oc delete pod copilot-files -n demojam-copilot
 ```
 

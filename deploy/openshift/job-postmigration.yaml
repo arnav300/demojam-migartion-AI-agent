@@ -1,0 +1,100 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: copilot-postmigration
+  labels:
+    app.kubernetes.io/name: copilot
+    app.kubernetes.io/component: postmigration
+spec:
+  backoffLimit: 0
+  # Created suspended: the image only exists after `oc start-build`. See README.md.
+  suspend: true
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: copilot
+        app.kubernetes.io/component: postmigration
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: postmigration
+          image: copilot:latest
+          imagePullPolicy: Always
+          workingDir: /app/aap-bridge
+          # After the migration: classify failures, compare with the prediction,
+          # draft remediation playbooks and render the enhanced report (all on the PVC).
+          command:
+            - /bin/bash
+            - -c
+            - |
+              A="/app/aap-bridge/.venv/bin/aap-migrate --config /app/config/config.yaml --log-file /app/state/logs/postmigration.log"
+              R=/app/state/reports
+              PRED=""
+              [ -f "$R/premigration-report.json" ] && PRED="--prediction $R/premigration-report.json"
+              $A classify-failures --output-dir "$R"
+              [ -n "$PRED" ] && $A prediction-check $PRED --output-dir "$R"
+              $A remediate --from "$R/classification.json" --out /app/state/remediation
+              $A enhanced-report --output "$R/enhanced-report.html" $PRED
+          env:
+            - name: HOME
+              value: /tmp
+            - name: MIGRATION_STATE_DB_PATH
+              value: sqlite:////app/state/migration_state.db
+            # Shared AI answer cache: a rehearsal run fills it, the live demo replays it.
+            - name: AI_CACHE_FILE
+              value: /app/state/ai_cache.json
+            - name: PATHS__EXPORT_DIR
+              value: /app/state/exports
+            - name: PATHS__TRANSFORM_DIR
+              value: /app/state/xformed
+            - name: PATHS__SCHEMA_DIR
+              value: /app/state/schemas
+            - name: PATHS__REPORT_DIR
+              value: /app/state/reports
+            - name: PATHS__BACKUP_DIR
+              value: /app/state/backups
+            - name: SOURCE__URL
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AAP_SOURCE_URL}
+            - name: SOURCE__TOKEN
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AAP_SOURCE_TOKEN}
+            - name: TARGET__URL
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AAP_TARGET_URL}
+            - name: TARGET__TOKEN
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AAP_TARGET_TOKEN}
+            # AI is optional: without AI_ENDPOINT in the Secret the run behaves as before.
+            - name: AI_ENDPOINT
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AI_ENDPOINT, optional: true}
+            - name: AI_MODEL
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AI_MODEL, optional: true}
+            - name: AI_TOKEN
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AI_TOKEN, optional: true}
+            - name: AI_VERIFY_SSL
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AI_VERIFY_SSL, optional: true}
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: state
+              mountPath: /app/state
+            - name: config
+              mountPath: /app/config
+              readOnly: true
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: copilot-state
+        - name: config
+          configMap:
+            name: copilot-config

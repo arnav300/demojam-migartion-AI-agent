@@ -9,7 +9,7 @@ pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[3]
 BASE = ROOT / "deploy" / "openshift"
-JOBS = ["job-migrate.yaml", "job-premigration.yaml"]
+JOBS = ["job-migrate.yaml", "job-premigration.yaml", "job-postmigration.yaml"]
 SECRET_KEYS = {
     "AAP_SOURCE_URL",
     "AAP_SOURCE_TOKEN",
@@ -18,6 +18,7 @@ SECRET_KEYS = {
     "AI_ENDPOINT",
     "AI_MODEL",
     "AI_TOKEN",
+    "AI_VERIFY_SSL",
 }
 
 
@@ -77,9 +78,10 @@ def test_jobs(name):
     assert set(refs) == SECRET_KEYS
     assert all(ref["name"] == "copilot-secrets" for ref in refs.values())
     # AI must stay optional: the Job runs without the AI_* keys.
-    for key in ("AI_ENDPOINT", "AI_MODEL", "AI_TOKEN"):
+    ai_keys = {"AI_ENDPOINT", "AI_MODEL", "AI_TOKEN", "AI_VERIFY_SSL"}
+    for key in ai_keys:
         assert refs[key].get("optional") is True
-    for key in SECRET_KEYS - {"AI_ENDPOINT", "AI_MODEL", "AI_TOKEN"}:
+    for key in SECRET_KEYS - ai_keys:
         assert not refs[key].get("optional")
     # No literal secret values in the manifest.
     assert all("value" not in e for e in env.values() if "TOKEN" in e["name"])

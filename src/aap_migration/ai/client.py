@@ -36,6 +36,8 @@ class AIConfig(BaseSettings):
     model: str = ""
     token: SecretStr | None = None
     timeout_seconds: float = 30.0
+    # In-cluster model endpoints often use self-signed certificates.
+    verify_ssl: bool = True
     max_tokens: int = 1024
     temperature: float = 0.1
     # One file for every AI answer; a rehearsal fills it, the live demo replays it.
@@ -104,7 +106,9 @@ class AIClient:
         }
         try:
             with httpx.Client(
-                timeout=self.config.timeout_seconds, transport=self._transport
+                timeout=self.config.timeout_seconds,
+                transport=self._transport,
+                verify=self.config.verify_ssl,
             ) as http:
                 response = http.post(self.config.chat_url, json=payload, headers=self._headers())
                 response.raise_for_status()

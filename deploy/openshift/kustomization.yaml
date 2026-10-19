@@ -14,6 +14,7 @@ resources:
   - buildconfig.yaml
   - job-premigration.yaml
   - job-migrate.yaml
+  - job-postmigration.yaml
   - dashboard.yaml
   # secret.example.yaml is intentionally not listed: create the Secret with `oc create secret`.
 

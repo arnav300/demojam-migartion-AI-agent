@@ -60,6 +60,8 @@ RUN ~/.local/bin/uv venv --seed --python 3.12 && \
 # C10: awx.awx (public upstream of ansible.controller) so 'aap-migrate remediate' can
 # syntax-check AI-drafted playbooks. ansible.controller itself is Automation Hub only.
 ENV ANSIBLE_COLLECTIONS_PATH=/app/aap-bridge/collections
+# Put the venv first so 'aap-migrate remediate' finds ansible-playbook.
+ENV PATH=/app/aap-bridge/.venv/bin:$PATH
 RUN /app/aap-bridge/.venv/bin/ansible-galaxy collection install "awx.awx==24.6.1" -p /app/aap-bridge/collections && \
     chmod -R a+rX /app/aap-bridge/collections
 

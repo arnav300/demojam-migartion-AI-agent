@@ -229,3 +229,10 @@ def test_check_failing_twice_returns_none(tmp_path):
     client = AIClient(AIConfig(endpoint="http://ai.test"), httpx.MockTransport(lambda r: _chat('{"rc_code": "RC-005"}')), cache_path=tmp_path / "c.json")
     assert client.complete_json("s", "u", _Rc, check=same_rc_code("RC-002")) is None
     assert not (tmp_path / "c.json").exists()
+
+
+def test_verify_ssl_from_env(monkeypatch):
+    monkeypatch.delenv("AI_VERIFY_SSL", raising=False)
+    assert AIConfig().verify_ssl is True
+    monkeypatch.setenv("AI_VERIFY_SSL", "false")
+    assert AIConfig().verify_ssl is False

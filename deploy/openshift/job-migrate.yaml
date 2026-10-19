@@ -69,6 +69,9 @@ spec:
             - name: AI_TOKEN
               valueFrom:
                 secretKeyRef: {name: copilot-secrets, key: AI_TOKEN, optional: true}
+            - name: AI_VERIFY_SSL
+              valueFrom:
+                secretKeyRef: {name: copilot-secrets, key: AI_VERIFY_SSL, optional: true}
           resources:
             requests:
               cpu: 500m
