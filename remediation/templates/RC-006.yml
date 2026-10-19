@@ -1,0 +1,46 @@
+# RC-006: Invalid inventory source configuration (hand-written remediation template)
+# AAP 2.6 rejects an inventory source that is inconsistent, e.g. a cloud source without
+# a credential or a source_path on a non-SCM source. This creates the sources on AAP 2.6
+# with corrected values. Fill remediation_inventory_sources first.
+#
+# Run (check mode by default):
+#   ansible-playbook RC-006.yml -e @RC-006.vars.yml -e @my-sources.yml
+#   ... -e '{"remediation_check_mode": false}'  to apply
+# Connection: AAP 2.6 from CONTROLLER_HOST / CONTROLLER_OAUTH_TOKEN in the environment.
+- name: "RC-006: create inventory sources with a valid configuration"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  vars:
+    # One entry per failed inventory source (names are in remediation_targets).
+    remediation_inventory_sources:
+      - name: CHANGE_ME
+        inventory: CHANGE_ME
+        organization: CHANGE_ME
+        source: CHANGE_ME               # e.g. ec2, azure_rm, scm
+        credential: CHANGE_ME           # required for cloud sources; "" for scm
+        source_project: ""              # scm sources only
+        source_path: ""                 # scm sources only
+  tasks:
+    - name: Affected inventory sources
+      ansible.builtin.debug:
+        msg: "{{ remediation_targets | default([]) }}"
+
+    - name: Stop until every source is filled in
+      ansible.builtin.assert:
+        that: "'CHANGE_ME' not in (remediation_inventory_sources | to_json)"
+        fail_msg: "Fill remediation_inventory_sources: inventory, organization, source and credential."
+
+    - name: Create or update each inventory source on AAP 2.6
+      ansible.controller.inventory_source:
+        name: "{{ item.name }}"
+        inventory: "{{ item.inventory }}"
+        organization: "{{ item.organization }}"
+        source: "{{ item.source }}"
+        credential: "{{ item.credential | default(omit, true) }}"
+        source_project: "{{ item.source_project | default(omit, true) }}"
+        source_path: "{{ item.source_path | default(omit, true) }}"
+      loop: "{{ remediation_inventory_sources }}"
+      loop_control:
+        label: "{{ item.name }}"

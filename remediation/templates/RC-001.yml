@@ -1,0 +1,40 @@
+# RC-001: Missing or broken project / playbook (hand-written remediation template)
+# Job templates were rejected because their project could not be synced or the
+# playbook was not found. This syncs the given projects on AAP 2.6; then retry the
+# job templates. If the project itself is wrong, fix its SCM URL / credential first.
+#
+# Run (check mode by default):
+#   ansible-playbook RC-001.yml -e @RC-001.vars.yml -e '{"remediation_projects": ["My Project"]}'
+#   ... -e '{"remediation_check_mode": false}'  to apply
+# Connection: AAP 2.6 from CONTROLLER_HOST / CONTROLLER_OAUTH_TOKEN in the environment.
+- name: "RC-001: sync projects, then retry the failed job templates"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  vars:
+    remediation_projects: [CHANGE_ME]    # projects the failed job templates use
+    remediation_organization: ""         # optional, to disambiguate project names
+  tasks:
+    - name: Affected job templates
+      ansible.builtin.debug:
+        msg: "{{ remediation_targets | default([]) }}"
+
+    - name: Stop until the projects are set
+      ansible.builtin.assert:
+        that: "'CHANGE_ME' not in (remediation_projects | to_json)"
+        fail_msg: "Set remediation_projects to the AAP 2.6 projects of the failed job templates."
+
+    - name: Sync each project on AAP 2.6 and wait for it
+      ansible.controller.project_update:
+        name: "{{ item }}"
+        organization: "{{ remediation_organization | default(omit, true) }}"
+        wait: true
+        timeout: 600
+      loop: "{{ remediation_projects }}"
+
+    - name: Next step
+      ansible.builtin.debug:
+        msg: >-
+          When every sync succeeded, re-import the job templates:
+          aap-migrate retry failed --resource-type job_templates --yes

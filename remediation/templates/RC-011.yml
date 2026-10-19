@@ -1,0 +1,20 @@
+# RC-011: Identity & access model change, Platform Gateway (hand-written remediation template, guidance only)
+# In AAP 2.6 users, teams and authentication live in the Platform Gateway. LDAP, SAML
+# or social-auth users need a matching Gateway authenticator before they can be
+# migrated. Authenticator settings are environment-specific, so this playbook changes nothing.
+#
+# Run: ansible-playbook RC-011.yml -e @RC-011.vars.yml
+- name: "RC-011: guidance for users and teams that need the Platform Gateway"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  tasks:
+    - name: What to do for each user or team
+      ansible.builtin.debug:
+        msg:
+          - "User or team: {{ item }}"
+          - "1. On AAP 2.6, configure the Gateway authenticator (LDAP / SAML / ...) these accounts come from."
+          - "2. Add authenticator maps for the organization and team memberships."
+          - "3. Re-run the IAM phase: aap-migrate iam --help, then aap-migrate retry failed --resource-type users --yes"
+      loop: "{{ remediation_targets | default([]) }}"

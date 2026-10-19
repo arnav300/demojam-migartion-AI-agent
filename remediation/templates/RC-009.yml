@@ -1,0 +1,31 @@
+# RC-009: Platform topology mismatch, VM to OpenShift (hand-written remediation template)
+# Instance groups pinned to AAP 2.4 VM hostnames cannot exist on AAP 2.6 on OpenShift.
+# This recreates them on AAP 2.6 as container groups with the same names, so the
+# templates that use them can be imported.
+#
+# Run (check mode by default):
+#   ansible-playbook RC-009.yml -e @RC-009.vars.yml
+#   ... -e '{"remediation_check_mode": false}'  to apply
+# Connection: AAP 2.6 from CONTROLLER_HOST / CONTROLLER_OAUTH_TOKEN in the environment.
+- name: "RC-009: recreate instance groups as container groups"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  vars:
+    remediation_container_credential: ""   # optional OpenShift/Kubernetes credential
+    remediation_pod_spec_override: ""      # optional pod spec YAML
+  tasks:
+    - name: Create a container group for each failed instance group
+      ansible.controller.instance_group:
+        name: "{{ item }}"
+        is_container_group: true
+        credential: "{{ remediation_container_credential | default(omit, true) }}"
+        pod_spec_override: "{{ remediation_pod_spec_override | default(omit, true) }}"
+      loop: "{{ remediation_targets | default([]) }}"
+
+    - name: Next step
+      ansible.builtin.debug:
+        msg: >-
+          Re-import what failed because of these groups:
+          aap-migrate retry failed --resource-type instance_groups --resource-type job_templates --yes

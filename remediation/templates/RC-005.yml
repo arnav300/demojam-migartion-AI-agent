@@ -1,0 +1,19 @@
+# RC-005: Broken workflow graph (hand-written remediation template, guidance only)
+# A workflow cannot be imported until every node template exists on AAP 2.6. This
+# playbook changes nothing: it lists the workflows and the order to fix them in.
+#
+# Run: ansible-playbook RC-005.yml -e @RC-005.vars.yml
+- name: "RC-005: guidance for workflows with broken nodes"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  tasks:
+    - name: What to do for each workflow
+      ansible.builtin.debug:
+        msg:
+          - "Workflow: {{ item }}"
+          - "1. Fix the failed node templates first (their own RC playbooks: RC-001 to RC-004, RC-006)."
+          - "2. On AAP 2.4, remove or re-point nodes whose template was deleted."
+          - "3. Re-import: aap-migrate retry failed --resource-type workflow_job_templates --yes"
+      loop: "{{ remediation_targets | default([]) }}"

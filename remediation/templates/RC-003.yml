@@ -1,0 +1,43 @@
+# RC-003: Schedule missing required survey variables (hand-written remediation template)
+# AAP 2.6 rejects a schedule whose template has required survey questions that the
+# schedule does not answer. This creates the schedules on AAP 2.6 with extra_data
+# that answers them. Fill remediation_schedules first (use the current defaults).
+#
+# Run (check mode by default):
+#   ansible-playbook RC-003.yml -e @RC-003.vars.yml -e @my-schedules.yml
+#   ... -e '{"remediation_check_mode": false}'  to apply
+# Connection: AAP 2.6 from CONTROLLER_HOST / CONTROLLER_OAUTH_TOKEN in the environment.
+- name: "RC-003: create schedules with the required survey variables"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  vars:
+    # One entry per failed schedule (names are in remediation_targets).
+    remediation_schedules:
+      - name: CHANGE_ME
+        unified_job_template: CHANGE_ME  # the job template the schedule launches
+        organization: CHANGE_ME
+        rrule: CHANGE_ME                 # copy from the AAP 2.4 schedule
+        extra_data:                      # every required survey variable
+          CHANGE_ME: CHANGE_ME
+  tasks:
+    - name: Affected schedules
+      ansible.builtin.debug:
+        msg: "{{ remediation_targets | default([]) }}"
+
+    - name: Stop until every schedule is filled in
+      ansible.builtin.assert:
+        that: "'CHANGE_ME' not in (remediation_schedules | to_json)"
+        fail_msg: "Fill remediation_schedules: template, organization, rrule and the survey answers."
+
+    - name: Create or update each schedule on AAP 2.6
+      ansible.controller.schedule:
+        name: "{{ item.name }}"
+        unified_job_template: "{{ item.unified_job_template }}"
+        organization: "{{ item.organization }}"
+        rrule: "{{ item.rrule }}"
+        extra_data: "{{ item.extra_data }}"
+      loop: "{{ remediation_schedules }}"
+      loop_control:
+        label: "{{ item.name }}"

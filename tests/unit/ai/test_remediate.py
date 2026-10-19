@@ -262,3 +262,39 @@ def test_real_syntax_check_with_shim(tmp_path):
     playbook.write_text(VALID_PLAYBOOK.replace("job_template", "no_such_module"))
     problems = tool_checks(playbook, vars_file, which=lambda n: n == "ansible-playbook" or None)
     assert problems and "syntax-check failed" in problems[0]
+
+
+REPO = Path(__file__).resolve().parents[3]
+TEMPLATES = REPO / "remediation" / "templates"
+
+
+def test_a_template_for_every_rc_code():
+    from aap_migration.ai.schemas import RC_CODES
+
+    assert sorted(p.stem for p in TEMPLATES.glob("RC-*.yml")) == list(RC_CODES)
+
+
+@pytest.mark.parametrize("rc", [f"RC-{n:03d}" for n in range(1, 12)])
+def test_templates_pass_the_same_static_checks_as_ai_drafts(rc):
+    text = (TEMPLATES / f"{rc}.yml").read_text()
+    assert static_problems(text) == []
+    assert "remediation_targets" in text or "remediation_" in text
+
+
+@pytest.mark.skipif(not _awx_available(), reason="needs ansible-core and awx.awx (present in the image)")
+@pytest.mark.parametrize("rc", [f"RC-{n:03d}" for n in range(1, 12)])
+def test_templates_pass_real_syntax_check(rc, tmp_path):
+    from aap_migration.ai.remediate import tool_checks
+
+    vars_file = tmp_path / "v.yml"
+    vars_file.write_text("remediation_check_mode: true\nremediation_targets: [a]\n")
+    playbook = tmp_path / f"{rc}.yml"
+    playbook.write_text((TEMPLATES / f"{rc}.yml").read_text())
+    assert tool_checks(playbook, vars_file, which=lambda n: n == "ansible-playbook" or None) == []
+
+
+def test_default_templates_dir_is_used_end_to_end(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_ENDPOINT", raising=False)
+    entries, out, _ = _build(tmp_path, TEMPLATES)
+    assert {e.source for e in entries.values()} == {"template"}
+    assert (out / "RC-002.yml").read_text() == (TEMPLATES / "RC-002.yml").read_text()

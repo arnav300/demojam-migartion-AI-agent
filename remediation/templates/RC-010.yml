@@ -1,0 +1,21 @@
+# RC-010: Feature deprecated or removed in AAP 2.6 (hand-written remediation template, guidance only)
+# The object uses something AAP 2.6 removed or changed: an old execution environment,
+# a Smart inventory, or a removed field. The right replacement is a design decision,
+# so this playbook changes nothing.
+#
+# Run: ansible-playbook RC-010.yml -e @RC-010.vars.yml
+- name: "RC-010: guidance for deprecated or removed features"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  tasks:
+    - name: What to do for each object
+      ansible.builtin.debug:
+        msg:
+          - "Object: {{ item }}"
+          - "Execution environment based on Ansible 2.9: move to a supported EE (ee-supported / ee-minimal)."
+          - "Smart inventory: recreate it as a Constructed inventory on AAP 2.6."
+          - "Removed or newly required field: see the error key in classification.csv and adjust on AAP 2.4."
+          - "Then re-import: aap-migrate retry failed --yes"
+      loop: "{{ remediation_targets | default([]) }}"

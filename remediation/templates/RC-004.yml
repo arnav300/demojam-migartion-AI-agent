@@ -1,0 +1,50 @@
+# RC-004: Schedule overrides a field not allowed on launch (hand-written remediation template)
+# AAP 2.6 rejects a schedule that sets extra_data or a prompt (inventory, limit, tags,
+# ...) its template does not prompt for. This enables the matching "prompt on launch"
+# flags on the job templates (which already exist on AAP 2.6); then retry the schedules.
+#
+# Run (check mode by default):
+#   ansible-playbook RC-004.yml -e @RC-004.vars.yml -e '{"remediation_job_templates": ["Deploy"]}'
+#   ... -e '{"remediation_check_mode": false}'  to apply
+# Connection: AAP 2.6 from CONTROLLER_HOST / CONTROLLER_OAUTH_TOKEN in the environment.
+- name: "RC-004: enable prompt-on-launch flags, then retry the schedules"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  vars:
+    remediation_job_templates: [CHANGE_ME]   # templates launched by the failed schedules
+    remediation_organization: ""             # optional, to disambiguate template names
+    # Enable only the flags the schedules need (see the error in classification.csv).
+    remediation_prompt_flags:
+      ask_variables_on_launch: true
+  tasks:
+    - name: Affected schedules
+      ansible.builtin.debug:
+        msg: "{{ remediation_targets | default([]) }}"
+
+    - name: Stop until the job templates are set
+      ansible.builtin.assert:
+        that: "'CHANGE_ME' not in (remediation_job_templates | to_json)"
+        fail_msg: "Set remediation_job_templates to the templates the failed schedules launch."
+
+    - name: Enable the prompt-on-launch flags
+      ansible.controller.job_template:
+        name: "{{ item }}"
+        organization: "{{ remediation_organization | default(omit, true) }}"
+        ask_variables_on_launch: "{{ remediation_prompt_flags.ask_variables_on_launch | default(omit) }}"
+        ask_inventory_on_launch: "{{ remediation_prompt_flags.ask_inventory_on_launch | default(omit) }}"
+        ask_limit_on_launch: "{{ remediation_prompt_flags.ask_limit_on_launch | default(omit) }}"
+        ask_tags_on_launch: "{{ remediation_prompt_flags.ask_tags_on_launch | default(omit) }}"
+        ask_skip_tags_on_launch: "{{ remediation_prompt_flags.ask_skip_tags_on_launch | default(omit) }}"
+        ask_scm_branch_on_launch: "{{ remediation_prompt_flags.ask_scm_branch_on_launch | default(omit) }}"
+        ask_job_type_on_launch: "{{ remediation_prompt_flags.ask_job_type_on_launch | default(omit) }}"
+        ask_verbosity_on_launch: "{{ remediation_prompt_flags.ask_verbosity_on_launch | default(omit) }}"
+        ask_diff_mode_on_launch: "{{ remediation_prompt_flags.ask_diff_mode_on_launch | default(omit) }}"
+        ask_credential_on_launch: "{{ remediation_prompt_flags.ask_credential_on_launch | default(omit) }}"
+        ask_execution_environment_on_launch: "{{ remediation_prompt_flags.ask_execution_environment_on_launch | default(omit) }}"
+      loop: "{{ remediation_job_templates }}"
+
+    - name: Next step
+      ansible.builtin.debug:
+        msg: "Re-import the schedules: aap-migrate retry failed --resource-type schedules --yes"

@@ -1,0 +1,20 @@
+# RC-008: Duplicate identity collision (hand-written remediation template, guidance only)
+# Two source objects resolve to the same identity on AAP 2.6 (or the object already
+# exists there). Renaming or merging is a decision for the owner, so this playbook
+# changes nothing.
+#
+# Run: ansible-playbook RC-008.yml -e @RC-008.vars.yml
+- name: "RC-008: guidance for duplicate objects"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  tasks:
+    - name: What to do for each duplicate
+      ansible.builtin.debug:
+        msg:
+          - "Object: {{ item }}"
+          - "1. Decide with the owner: rename, merge, or keep the copy already on AAP 2.6."
+          - "2. If you keep the AAP 2.6 copy, nothing else is needed."
+          - "3. Otherwise rename on AAP 2.4, re-export, then: aap-migrate retry failed --yes"
+      loop: "{{ remediation_targets | default([]) }}"

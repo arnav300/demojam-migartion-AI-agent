@@ -1,0 +1,19 @@
+# RC-007: Credential secrets (hand-written remediation template, guidance only)
+# Credential secrets cannot be read through the API; the migration toolkit migrates
+# them with its dedicated secret tool. This playbook changes nothing.
+#
+# Run: ansible-playbook RC-007.yml -e @RC-007.vars.yml
+- name: "RC-007: guidance for credentials imported without their secrets"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  tasks:
+    - name: What to do for each credential
+      ansible.builtin.debug:
+        msg:
+          - "Credential: {{ item }}"
+          - "1. Run the toolkit's credential secret migration (see 'aap-migrate credentials --help')."
+          - "2. Or re-enter the secret on AAP 2.6 (Automation Execution > Infrastructure > Credentials)."
+          - "3. Then re-import: aap-migrate retry failed --resource-type credentials --yes"
+      loop: "{{ remediation_targets | default([]) }}"

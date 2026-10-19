@@ -1,0 +1,52 @@
+# RC-002: Job template without inventory (hand-written remediation template)
+# AAP 2.6 rejects a job template that has no inventory and does not prompt for one.
+# This creates the job templates on AAP 2.6 with an inventory you choose (or with
+# "prompt on launch" for the inventory). Fill remediation_job_templates first.
+#
+# Run (check mode by default):
+#   ansible-playbook RC-002.yml -e @RC-002.vars.yml -e @my-job-templates.yml
+#   ... -e '{"remediation_check_mode": false}'  to apply
+# Connection: AAP 2.6 from CONTROLLER_HOST / CONTROLLER_OAUTH_TOKEN in the environment.
+- name: "RC-002: create the failed job templates with an inventory"
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  check_mode: "{{ remediation_check_mode | default(true) }}"
+  vars:
+    # One entry per failed job template (names are in remediation_targets).
+    remediation_job_templates:
+      - name: CHANGE_ME
+        organization: CHANGE_ME
+        project: CHANGE_ME
+        playbook: CHANGE_ME
+        inventory: CHANGE_ME             # or "" with ask_inventory_on_launch: true
+        ask_inventory_on_launch: false
+  tasks:
+    - name: Affected job templates
+      ansible.builtin.debug:
+        msg: "{{ remediation_targets | default([]) }}"
+
+    - name: Stop until every job template is filled in
+      ansible.builtin.assert:
+        that:
+          - "'CHANGE_ME' not in (remediation_job_templates | to_json)"
+          - remediation_job_templates | selectattr('inventory', 'falsy') | rejectattr('ask_inventory_on_launch') | list | length == 0
+        fail_msg: "Fill remediation_job_templates; each needs an inventory or ask_inventory_on_launch: true."
+
+    - name: Create or update each job template on AAP 2.6
+      ansible.controller.job_template:
+        name: "{{ item.name }}"
+        organization: "{{ item.organization }}"
+        project: "{{ item.project }}"
+        playbook: "{{ item.playbook }}"
+        inventory: "{{ item.inventory | default(omit, true) }}"
+        ask_inventory_on_launch: "{{ item.ask_inventory_on_launch | default(false) }}"
+      loop: "{{ remediation_job_templates }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Next step
+      ansible.builtin.debug:
+        msg: >-
+          Mark them done in the migration state (or re-import the full definitions):
+          aap-migrate retry failed --resource-type job_templates --yes
