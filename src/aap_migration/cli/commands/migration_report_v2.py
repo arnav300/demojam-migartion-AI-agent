@@ -834,6 +834,12 @@ def _build_full_org_summary(
     type=str,
     help="Generate report for a single organization only (case-insensitive match)",
 )
+@click.option(
+    "--ai/--no-ai",
+    "use_ai",
+    default=None,
+    help="Add an AI-written summary panel to the HTML (default: on when AI_ENDPOINT is set).",
+)
 @pass_context
 @requires_config
 @handle_errors
@@ -843,6 +849,7 @@ def generate_enhanced_report(
     resource_type: str | None,
     output_format: str,
     organization: str | None,
+    use_ai: bool | None = None,
 ) -> None:
     """Generate enhanced migration report with error analysis and metadata enrichment.
 
@@ -1118,8 +1125,9 @@ def generate_enhanced_report(
 
         # Step 6: Generate report in chosen format
         if output_format == "html":
+            summary_html = _ai_summary_panel(org_summary, use_ai)
             echo_info("Generating enhanced HTML report...")
-            report_content = _generate_enhanced_html(org_summary, migration_state, export_dir, org_mapper, source_config=ctx.config.source)
+            report_content = _generate_enhanced_html(org_summary, migration_state, export_dir, org_mapper, source_config=ctx.config.source, summary_html=summary_html)
         elif output_format == "markdown":
             echo_info("Generating enhanced Markdown report...")
             report_content = _format_enhanced_markdown(org_summary, migration_state, error_counter)
@@ -1418,8 +1426,32 @@ def _format_enhanced_csv(org_summary: dict) -> str:
 # ---------------------------------------------------------------------------
 # HTML Generation
 # ---------------------------------------------------------------------------
-def _generate_enhanced_html(org_summary: dict, migration_state, export_dir: Path, org_mapper: OrganizationMapper, source_config=None) -> str:
-    """Generate the enhanced interactive HTML report."""
+def _ai_summary_panel(org_summary: dict, use_ai: bool | None) -> str:
+    """C9 summary panel HTML, or "" when AI is off or no valid narrative came back."""
+    from aap_migration.ai.narrative import (
+        build_narrative,
+        enhanced_aggregates,
+        render_summary_panel,
+    )
+    from aap_migration.cli.commands.premigration_report import resolve_ai
+
+    if not resolve_ai(use_ai):
+        return ""
+    echo_info("Asking the AI model for the executive summary ...")
+    aggregates = enhanced_aggregates(org_summary)
+    narrative = build_narrative(aggregates)
+    if narrative is None:
+        echo_info("No AI summary available; the report is shown without it.")
+        return ""
+    return render_summary_panel(narrative, aggregates, kind="enhanced") + "\n"
+
+
+def _generate_enhanced_html(org_summary: dict, migration_state, export_dir: Path, org_mapper: OrganizationMapper, source_config=None, summary_html: str = "") -> str:
+    """Generate the enhanced interactive HTML report.
+
+    ``summary_html`` (the optional AI summary panel) is inserted under the header;
+    when empty the page is unchanged.
+    """
     from html import escape
 
     user_emails = _build_user_email_lookup(export_dir, org_mapper, source_config)
@@ -1565,7 +1597,7 @@ def _generate_enhanced_html(org_summary: dict, migration_state, export_dir: Path
             Dynamic error classification &bull; Sortable &bull; Resizable &bull; Click for details
         </div>
     </div>
-    <div class="tabs">
+{summary_html}    <div class="tabs">
         <button class="tab active" data-tab="summary">&#x1F4CA; Overview</button>
         <button class="tab" data-tab="successful">&#x2705; Successful</button>
         <button class="tab" data-tab="failures">&#x274C; Failed</button>

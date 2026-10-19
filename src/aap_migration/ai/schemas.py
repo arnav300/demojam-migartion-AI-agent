@@ -16,6 +16,7 @@ RC_CODES = tuple(f"RC-{n:03d}" for n in range(1, 12))
 RC_CODE_PATTERN = r"^RC-0(0[1-9]|1[01])$"
 
 _SENTENCE_END_RE = re.compile(r"[.!?]+(?:\s+|$)")
+_ALLOWED_NUMBERS_RE = re.compile(r"\bRC-\d{3}\b|\b(?:AAP\s*)?2\.[46x]\b")
 
 
 def _count_sentences(text: str) -> int:
@@ -81,3 +82,12 @@ class ReportNarrative(BaseModel):
     _limit_words = field_validator(
         "headline", "what_migrated", "what_failed", "what_to_do_next"
     )(_max_words(120))
+
+    @field_validator("headline", "what_migrated", "what_failed", "what_to_do_next")
+    @classmethod
+    def _no_numbers(cls, value: str) -> str:
+        # Numbers in the report come from our data, never from the model.
+        # Only AAP versions (2.4, 2.6) and RC codes may contain digits.
+        if re.search(r"\d", _ALLOWED_NUMBERS_RE.sub("", value)):
+            raise ValueError("must not contain numbers; the report shows the numbers")
+        return value

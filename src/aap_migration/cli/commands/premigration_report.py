@@ -36,6 +36,7 @@ import click
 
 from aap_migration.ai.client import is_enabled as ai_is_enabled
 from aap_migration.ai.explain import CACHE_FILENAME, explain_findings
+from aap_migration.ai.narrative import build_narrative, premigration_aggregates
 from aap_migration.analysis.premigration import (
     OUTCOME_LABELS,
     RC_CATALOG,
@@ -99,18 +100,26 @@ def filter_report_by_org(report: dict, organization: str) -> dict:
     return report
 
 
-def _add_ai_explanations(
-    report: dict, result, use_ai: bool | None, output_dir: Path, scoped: bool
-) -> None:
-    """Attach ``report["ai_explanations"]`` (C7) when AI is on; otherwise leave the report as is."""
+def resolve_ai(use_ai: bool | None) -> bool:
+    """--ai/--no-ai: default on when AI_ENDPOINT is set; --ai without it warns and stays off."""
     enabled = ai_is_enabled()
-    if use_ai is None:
-        use_ai = enabled
-    if not use_ai:
-        return
-    if not enabled:
-        echo_warning("--ai given but AI_ENDPOINT is not set: continuing without AI explanations.")
-        return
+    if use_ai and not enabled:
+        echo_warning("--ai given but AI_ENDPOINT is not set: continuing without AI.")
+    return enabled if use_ai is None else (use_ai and enabled)
+
+
+def _add_ai_summary(report: dict) -> None:
+    """Attach ``report["ai_narrative"]`` (C9) built from aggregate counts only."""
+    echo_info("Asking the AI model for the executive summary ...")
+    narrative = build_narrative(premigration_aggregates(report))
+    if narrative:
+        report["ai_narrative"] = narrative.model_dump()
+    else:
+        echo_warning("No AI summary available; the report is shown without it.")
+
+
+def _add_ai_explanations(report: dict, result, output_dir: Path, scoped: bool) -> None:
+    """Attach ``report["ai_explanations"]`` (C7). Only called when AI is on."""
     if scoped:
         # Only the filtered organization's findings may reach the prompt.
         result = dataclasses.replace(
@@ -347,7 +356,9 @@ def generate_premigration_report(
     if organization:
         report = filter_report_by_org(report, organization)
 
-    _add_ai_explanations(report, result, use_ai, output_dir, scoped=bool(organization))
+    if resolve_ai(use_ai):
+        _add_ai_explanations(report, result, output_dir, scoped=bool(organization))
+        _add_ai_summary(report)
 
     base = name
     if organization:

@@ -111,7 +111,8 @@ def build_narrative_prompt(aggregates: dict[str, Any]) -> tuple[str, str]:
     """Prompt for a :class:`ReportNarrative` from aggregate counts only."""
     system = _system(
         "Write a short executive summary of this migration for a non-technical "
-        "reader. Each field is at most 120 words. Do not state any number; the "
-        "report shows the numbers next to your sentences."
+        "reader. Each field is at most 120 words. Do not write any number or digit "
+        "(AAP versions and RC codes are allowed); the report shows our numbers next "
+        "to your sentences."
     )
     return system, _user({"aggregates": aggregates})

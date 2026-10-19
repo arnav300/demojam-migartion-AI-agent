@@ -6,7 +6,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 from aap_migration.ai.client import AIClient, AIConfig
 from aap_migration.ai.explain import explain_findings, group_findings
 from aap_migration.analysis.premigration import run_analysis
@@ -150,17 +149,14 @@ def test_ai_on_html_adds_explanations():
     assert "<script>alert(1)</script>" not in html  # embedded JSON is escaped
 
 
-def test_command_helper_ai_off_leaves_report_unchanged(result, tmp_path, monkeypatch):
+def test_resolve_ai_flag(monkeypatch):
     monkeypatch.delenv("AI_ENDPOINT", raising=False)
-    report = {"organizations": {}}
-    for flag in (None, True, False):
-        premigration_report._add_ai_explanations(report, result, flag, tmp_path, scoped=False)
-    assert report == {"organizations": {}}
-    assert not (tmp_path / "ai_cache.json").exists()
-
-
-def test_command_helper_respects_no_ai_and_org_scope(result, tmp_path, monkeypatch):
+    assert [premigration_report.resolve_ai(f) for f in (None, True, False)] == [False] * 3
     monkeypatch.setenv("AI_ENDPOINT", "http://ai.test")
+    assert [premigration_report.resolve_ai(f) for f in (None, True, False)] == [True, True, False]
+
+
+def test_command_helper_scopes_findings_to_org(result, tmp_path, monkeypatch):
     seen = []
 
     def fake_explain(res, cache_path):
@@ -169,10 +165,7 @@ def test_command_helper_respects_no_ai_and_org_scope(result, tmp_path, monkeypat
 
     monkeypatch.setattr(premigration_report, "explain_findings", fake_explain)
 
-    premigration_report._add_ai_explanations({}, result, False, tmp_path, scoped=False)
-    assert seen == []
-
     report = {"organizations": {"Org B": {}}}
-    premigration_report._add_ai_explanations(report, result, None, tmp_path, scoped=True)
+    premigration_report._add_ai_explanations(report, result, tmp_path, scoped=True)
     assert seen == [{"Org B"}]
     assert "ai_explanations" not in report

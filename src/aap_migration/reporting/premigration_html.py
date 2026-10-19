@@ -9,6 +9,8 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
+from aap_migration.ai.narrative import premigration_aggregates, render_summary_panel
+from aap_migration.ai.schemas import ReportNarrative
 from aap_migration.reporting.ui_kit import page
 
 _BODY = """
@@ -374,5 +376,13 @@ def render_premigration_html(report: dict[str, Any]) -> str:
         .replace("__SRC_URL__", escape(str(src.get("url") or "source AAP")))
         .replace("__GENERATED__", escape(str(report.get("generated", ""))[:16].replace("T", " ")))
     )
+    if report.get("ai_narrative"):
+        # C9: model sentences around our own numbers; omitted entirely when AI is off.
+        panel = render_summary_panel(
+            ReportNarrative.model_validate(report["ai_narrative"]),
+            premigration_aggregates(report),
+            kind="premigration",
+        )
+        body = body.replace("</header>\n", "</header>\n" + panel + "\n", 1)
     script = _SCRIPT + _AI_EXPLANATIONS_SCRIPT if report.get("ai_explanations") else _SCRIPT
     return page("Pre-migration Assessment", body, script, {"REPORT": report})
