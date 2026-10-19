@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pre-migration Assessment</title>
+<style>
+:root {
+  --paper: #f8f9fb;
+  --surface: #ffffff;
+  --ink: #111827;
+  --ink-2: #4b5563;
+  --ink-3: #9ca3af;
+  --line: #e5e7eb;
+  --line-2: #f3f4f6;
+  --focus: #2563eb;
+  --brand: #ee0000;
+
+  --will_fail: #dc2626;
+  --at_risk: #d97706;
+  --needs_action: #2563eb;
+  --stale: #7c3aed;
+  --ready: #059669;
+
+  --will_fail-bg: #fef2f2;
+  --at_risk-bg: #fffbeb;
+  --needs_action-bg: #eff6ff;
+  --stale-bg: #f5f3ff;
+  --ready-bg: #ecfdf5;
+
+  --radius: 12px;
+  --radius-s: 6px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.05);
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f1117; --surface: #1a1d27; --ink: #f3f4f6; --ink-2: #d1d5db; --ink-3: #6b7280;
+    --line: #374151; --line-2: #1f2937; --focus: #60a5fa;
+    --will_fail: #f87171; --at_risk: #fbbf24; --needs_action: #60a5fa; --stale: #a78bfa; --ready: #34d399;
+    --will_fail-bg: #2a1515; --at_risk-bg: #2a2210; --needs_action-bg: #15223a; --stale-bg: #1f1a30; --ready-bg: #0f2920;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.2); --shadow: 0 1px 3px rgba(0,0,0,.3);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0f1117; --surface: #1a1d27; --ink: #f3f4f6; --ink-2: #d1d5db; --ink-3: #6b7280;
+  --line: #374151; --line-2: #1f2937; --focus: #60a5fa;
+  --will_fail: #f87171; --at_risk: #fbbf24; --needs_action: #60a5fa; --stale: #a78bfa; --ready: #34d399;
+  --will_fail-bg: #2a1515; --at_risk-bg: #2a2210; --needs_action-bg: #15223a; --stale-bg: #1f1a30; --ready-bg: #0f2920;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.2); --shadow: 0 1px 3px rgba(0,0,0,.3);
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 14px/1.6 -apple-system, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 { line-height: 1.25; }
+h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: 1.125rem; font-weight: 600; }
+h3 { font-size: 0.9375rem; font-weight: 600; }
+p { margin: 0; }
+a { color: var(--focus); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.muted { color: var(--ink-3); }
+.small { font-size: 0.8125rem; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+@media (max-width: 640px) { .wrap { padding: 0 16px; } }
+
+/* Masthead — clean & flat */
+.masthead {
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.masthead .wrap {
+  padding-top: 20px; padding-bottom: 16px;
+  display: flex; gap: 14px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+}
+.masthead .brand-bar { width: 4px; align-self: stretch; background: var(--brand); border-radius: 2px; flex: none; }
+.masthead .titles { flex: 1; min-width: 200px; }
+.masthead h1 { margin-bottom: 2px; }
+.masthead .meta { color: var(--ink-3); font-size: 0.8125rem; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.theme-btn {
+  border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-s);
+  padding: 5px 10px; cursor: pointer; color: var(--ink-3); font-size: 0.8125rem;
+  transition: border-color .15s;
+}
+.theme-btn:hover { border-color: var(--ink-3); }
+
+/* Hero: success percentage + strip */
+.hero { padding: 32px 0 12px; }
+.hero-row { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.hero .pct {
+  font-size: 3rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.hero .pct-label { color: var(--ink-2); font-size: 0.9375rem; max-width: 50ch; }
+.strip { display: flex; height: 8px; border-radius: 99px; overflow: hidden; background: var(--line-2); }
+.strip .seg { height: 100%; min-width: 2px; border-right: 2px solid var(--paper); cursor: pointer; transition: filter .15s; }
+.strip .seg:last-child { border-right: 0; }
+.strip .seg:hover { filter: brightness(1.15); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 20px; margin-top: 14px; }
+.legend button {
+  background: none; border: 0; padding: 2px 0; cursor: pointer;
+  display: flex; gap: 6px; align-items: center; font-size: 0.8125rem;
+}
+.legend .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.legend .n { font-weight: 700; font-size: 0.9375rem; color: var(--ink); }
+.legend .l { color: var(--ink-3); }
+
+/* Tabs — underline style, minimal */
+.tabs {
+  display: flex; gap: 0; border-bottom: 1px solid var(--line); margin-top: 24px; overflow-x: auto;
+}
+.tabs button {
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 10px 16px 8px; cursor: pointer; color: var(--ink-3); font-weight: 500;
+  font-size: 0.875rem; white-space: nowrap; transition: color .15s, border-color .15s;
+}
+.tabs button:hover { color: var(--ink-2); }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.tabs .count { font-weight: 400; color: var(--ink-3); margin-left: 5px; font-size: 0.75rem; }
+.panel { padding: 24px 0 48px; }
+.panel[hidden] { display: none; }
+
+/* Layout */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+@media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+.section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 20px; box-shadow: var(--shadow-sm);
+}
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; }
+.stack > * + * { margin-top: 20px; }
+
+/* Horizontal bars — slimmer */
+.hbars { display: grid; grid-template-columns: minmax(100px, max-content) minmax(0, 1fr) 4em; gap: 6px 12px; align-items: center; }
+.hbars .lbl { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; font-size: 0.8125rem; }
+.hbars.wrap-labels { grid-template-columns: minmax(140px, 40%) minmax(0, 1fr) 3.5em; }
+.hbars.wrap-labels .lbl { white-space: normal; max-width: none; line-height: 1.35; }
+.hbars .lbl button { all: unset; cursor: pointer; }
+.hbars .lbl button:hover { text-decoration: underline; }
+.hbars .track { height: 6px; background: var(--line-2); border-radius: 99px; display: flex; overflow: hidden; }
+.hbars .track span { height: 100%; }
+.hbars .val { text-align: right; font-weight: 600; font-size: 0.8125rem; }
+
+/* Controls — lighter touch */
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-bottom: 16px; }
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field label { font-size: 0.75rem; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 500; }
+.field input, .field select {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-s);
+  padding: 6px 10px; min-width: 140px; font-size: 0.8125rem;
+  transition: border-color .15s;
+}
+.field input:focus, .field select:focus { border-color: var(--focus); }
+.field input[type="search"] { min-width: 220px; }
+.btn {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-s);
+  padding: 6px 12px; cursor: pointer; font-weight: 500; font-size: 0.8125rem; color: var(--ink-2);
+  transition: all .15s;
+}
+.btn:hover { border-color: var(--ink-3); color: var(--ink); }
+.btn.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.btn[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.result-count { margin-left: auto; color: var(--ink-3); font-size: 0.8125rem; align-self: center; }
+
+/* Tables — lighter */
+.table-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; max-height: 70vh; box-shadow: var(--shadow-sm); }
+table.data { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+table.data th {
+  position: sticky; top: 0; z-index: 1; background: var(--surface);
+  text-align: left; font-weight: 500; color: var(--ink-3); padding: 10px 14px;
+  border-bottom: 1px solid var(--line); white-space: nowrap; font-size: 0.75rem;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+table.data th.sortable { cursor: pointer; user-select: none; }
+table.data th.sortable:hover { color: var(--ink); }
+table.data th .arrow { color: var(--ink-3); margin-left: 3px; font-size: 0.65em; }
+table.data td { padding: 10px 14px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+table.data tr:last-child td { border-bottom: 0; }
+table.data tbody tr.clickable { cursor: pointer; }
+table.data tbody tr.clickable:hover td { background: var(--line-2); }
+table.data td.num, table.data th.num { text-align: right; }
+.trunc { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty { padding: 48px 20px; text-align: center; color: var(--ink-3); font-size: 0.875rem; }
+.pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--ink-3); font-size: 0.8125rem; }
+
+/* Pills — compact */
+.pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+}
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.o-will_fail { color: var(--will_fail); background: var(--will_fail-bg); }
+.o-at_risk { color: var(--at_risk); background: var(--at_risk-bg); }
+.o-needs_action { color: var(--needs_action); background: var(--needs_action-bg); }
+.o-stale { color: var(--stale); background: var(--stale-bg); }
+.o-ready { color: var(--ready); background: var(--ready-bg); }
+.rc { font-weight: 600; font-size: 0.75rem; color: var(--ink-3); white-space: nowrap; }
+.tag {
+  display: inline-block; border: 1px solid var(--line); border-radius: var(--radius-s);
+  padding: 0 5px; font-size: 0.6875rem; color: var(--ink-3); margin: 0 3px 3px 0;
+}
+
+/* Stat cards */
+.stat-cards { display: flex; flex-wrap: wrap; gap: 12px; }
+.stat-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 16px 20px; flex: 1 1 140px; min-width: 120px; box-shadow: var(--shadow-sm);
+}
+.stat-card .stat-value { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
+.stat-card .stat-label { font-size: 0.75rem; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+
+/* Assessment header */
+.assessment-subtitle { color: var(--ink-2); font-size: 0.875rem; margin-top: 4px; }
+.assessment-subtitle .sep { color: var(--line); margin: 0 6px; }
+
+/* Success section — structured two-column layout */
+.success-section { padding: 28px 0 16px; }
+.success-grid { display: grid; grid-template-columns: auto 1fr; gap: 0 32px; align-items: center; }
+.success-pct-block { text-align: center; padding-right: 32px; border-right: 1px solid var(--line); }
+.success-pct-block .pct { font-size: 3.5rem; font-weight: 800; letter-spacing: -0.04em; line-height: 1; color: var(--ink); }
+.success-pct-block .pct-sub { font-size: 0.8125rem; color: var(--ink-3); margin-top: 4px; }
+.success-detail { display: flex; flex-direction: column; gap: 14px; }
+.success-detail .summary-line { font-size: 0.9375rem; color: var(--ink-2); line-height: 1.5; max-width: 56ch; }
+.outcome-row { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.outcome-item { display: flex; align-items: center; gap: 6px; font-size: 0.8125rem; }
+.outcome-item .o-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.outcome-item .o-val { font-weight: 700; font-size: 0.9375rem; }
+.outcome-item .o-lbl { color: var(--ink-3); }
+
+/* Section descriptions */
+.section-desc { color: var(--ink-3); font-size: 0.8125rem; margin-bottom: 14px; line-height: 1.45; }
+
+/* Toggle button with tooltip (Root only) */
+.btn-toggle { position: relative; }
+.btn-toggle[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.btn-toggle[aria-pressed="true"]::after { content: " ✓"; }
+.btn-toggle .btn-tooltip {
+  display: none; position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: var(--ink); color: var(--surface); font-size: 0.6875rem; font-weight: 400;
+  padding: 5px 10px; border-radius: var(--radius-s); white-space: nowrap; z-index: 10;
+  pointer-events: none; box-shadow: var(--shadow); line-height: 1.4;
+}
+.btn-toggle .btn-tooltip::after {
+  content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: var(--ink);
+}
+.btn-toggle:hover .btn-tooltip { display: block; }
+
+/* Drawer — slide-in panel */
+.drawer-bg { position: fixed; inset: 0; background: rgba(0,0,0,.25); z-index: 50; backdrop-filter: blur(2px); }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100vw);
+  background: var(--surface); z-index: 51; border-left: 1px solid var(--line);
+  overflow-y: auto; padding: 24px; transform: translateX(100%); transition: transform .2s ease;
+  box-shadow: -4px 0 24px rgba(0,0,0,.08);
+}
+.drawer.open { transform: none; }
+.drawer-bg[hidden] { display: none; }
+.drawer .close { position: absolute; top: 12px; right: 12px; }
+.drawer dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 14px 0 0; font-size: 0.8125rem; }
+.drawer dt { color: var(--ink-3); font-weight: 500; }
+.drawer dd { margin: 0; overflow-wrap: anywhere; }
+.drawer .finding { border-left: 3px solid var(--line); padding: 6px 0 6px 14px; margin-top: 16px; }
+.drawer .finding p + p { margin-top: 6px; }
+.drawer pre { background: var(--paper); border: 1px solid var(--line-2); border-radius: var(--radius-s); padding: 8px 10px; font-size: 0.75rem; overflow-x: auto; margin: 8px 0 0; }
+@media (prefers-reduced-motion: reduce) { .drawer, .strip .seg { transition: none; } }
+@media print { .tabs, .toolbar, .theme-btn, .pager { display: none !important; } .panel[hidden] { display: block !important; } .table-wrap { max-height: none; } }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="brand-bar" aria-hidden="true"></div>
+    <div class="titles">
+      <h1>Pre-migration Assessment</h1>
+      <p class="assessment-subtitle">
+        Migration AAP 2.4 → 2.6 on OpenShift<span class="sep">·</span>Source AAP 2.4: https://aap24.example.com<span class="sep">·</span>Date: 2026-10-19 12:00
+      </p>
+    </div>
+    <button class="theme-btn" id="themeBtn" type="button">◐ Theme</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- Success section — structured two-column -->
+  <section class="success-section" aria-labelledby="successTitle">
+    <div class="success-grid">
+      <div class="success-pct-block">
+        <div class="pct" id="successPct"></div>
+        <div class="pct-sub">first-pass success</div>
+      </div>
+      <div class="success-detail">
+        <p class="summary-line" id="successTitle"></p>
+        <div class="outcome-row" id="outcomeRow"></div>
+      </div>
+    </div>
+    <div class="strip" id="strip" role="group" aria-label="Resources by predicted outcome" style="margin-top:20px"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <!-- Stat cards -->
+  <section class="stat-cards" id="statCards" aria-label="Key numbers" style="margin-bottom:8px"></section>
+
+  <!-- Tabs -->
+  <nav class="tabs" role="tablist" aria-label="Report sections">
+    <button role="tab" data-tab="overview">Overview</button>
+    <button role="tab" data-tab="findings">Findings <span class="count" id="cFindings"></span></button>
+    <button role="tab" data-tab="stale">Stale data <span class="count" id="cStale"></span></button>
+    <button role="tab" data-tab="orgs">Organizations <span class="count" id="cOrgs"></span></button>
+    <button role="tab" data-tab="causes">Root causes</button>
+  </nav>
+
+  <!-- Overview -->
+  <section class="panel" id="panel-overview" role="tabpanel">
+    <div class="grid-2">
+      <div class="card stack">
+        <div class="section-title"><h2>Failure root causes</h2></div>
+        <p class="section-desc">Each bar shows which root-cause rule is responsible for flagging resources. Click a bar to drill into its affected objects.</p>
+        <div id="rcBars"></div>
+      </div>
+      <div class="card stack">
+        <div class="section-title"><h2>Readiness by type</h2></div>
+        <p class="section-desc">Migration readiness breakdown by AAP resource type. Colour segments show how many objects are ready, at risk, or will fail.</p>
+        <div id="typeBars"></div>
+      </div>
+    </div>
+    <div class="card stack" style="margin-top:24px">
+      <div class="section-title"><h2>Organizations needing attention</h2></div>
+      <p class="section-desc">Organizations with the most objects predicted to fail or be at risk. Click to see specific findings.</p>
+      <div id="orgBars"></div>
+    </div>
+  </section>
+
+  <!-- Findings -->
+  <section class="panel" id="panel-findings" role="tabpanel" hidden>
+    <p class="section-desc">All individual problems detected across resources. Each row is a finding tied to a root-cause rule. Click a row for full detail and remediation.</p>
+    <div class="toolbar">
+      <div class="field"><label for="fSearch">Search</label><input type="search" id="fSearch" placeholder="Name, problem or ID…"></div>
+      <div class="field"><label for="fImpact">Impact</label><select id="fImpact"></select></div>
+      <div class="field"><label for="fRc">Root cause</label><select id="fRc"></select></div>
+      <div class="field"><label for="fType">Type</label><select id="fType"></select></div>
+      <div class="field"><label for="fOrg">Organization</label><select id="fOrg"></select></div>
+      <button class="btn btn-toggle" type="button" id="fCascade" aria-pressed="false">Root only<span class="btn-tooltip">Show only root problems, hide knock-on<br>effects caused by other failing resources</span></button>
+      <button class="btn" type="button" id="fReset">Clear</button>
+      <button class="btn" type="button" id="fCsv">↓ CSV</button>
+      <span class="result-count" id="fCount"></span>
+    </div>
+    <div id="findingsTable"></div>
+  </section>
+
+  <!-- Stale data -->
+  <section class="panel" id="panel-stale" role="tabpanel" hidden>
+    <p class="section-desc" id="staleIntro"></p>
+    <div class="toolbar">
+      <div class="field"><label for="sSearch">Search</label><input type="search" id="sSearch" placeholder="Name or owner…"></div>
+      <div class="field"><label for="sType">Type</label><select id="sType"></select></div>
+      <div class="field"><label for="sOrg">Organization</label><select id="sOrg"></select></div>
+      <button class="btn" type="button" id="sCsv">↓ Cleanup CSV</button>
+      <span class="result-count" id="sCount"></span>
+    </div>
+    <div id="staleTable"></div>
+  </section>
+
+  <!-- Organizations -->
+  <section class="panel" id="panel-orgs" role="tabpanel" hidden>
+    <p class="section-desc">All organizations in the AAP estate with object counts and migration readiness breakdown. Click an organization to see its findings.</p>
+    <div class="toolbar">
+      <div class="field"><label for="oSearch">Search</label><input type="search" id="oSearch" placeholder="Organization name…"></div>
+      <span class="result-count" id="oCount"></span>
+    </div>
+    <div id="orgTable"></div>
+  </section>
+
+  <!-- Root causes -->
+  <section class="panel" id="panel-causes" role="tabpanel" hidden>
+    <p class="section-desc">Catalogue of root-cause rules applied during analysis. Each card explains why objects are flagged and how to fix them before migrating.</p>
+    <div id="causes" class="grid-2"></div>
+  </section>
+</main>
+
+
+<div class="drawer-bg" id="drawerBg" hidden></div>
+<aside class="drawer" id="drawer" aria-hidden="true" aria-label="Details">
+  <button class="btn close" id="drawerClose" type="button">✕ Close</button>
+  <div id="drawerBody"></div>
+</aside>
+
+<script>
+const REPORT = {"schema_version":"1.0","report_type":"premigration","generated":"2026-10-19T12:00:00+00:00","source":{"url":"https://aap24.example.com","version":"2.4","data_source":"export"},"target":{"version":"2.6","platform":"OpenShift"},"summary":{"total_resources":6,"inventory_counts":{"organizations":2,"projects":1,"job_templates":3},"outcomes":{"will_fail":3,"at_risk":0,"needs_action":0,"stale":0,"ready":3},"findings_total":7,"findings_by_severity":{"critical":4,"high":0,"medium":0,"low":3,"info":0},"findings_by_rc":{"RC-001":1,"RC-002":3,"STALE":3},"resources_by_rc":{"RC-001":1,"RC-002":3,"STALE":3},"outcomes_by_type":{"job_templates":{"will_fail":3}},"predicted_success_pct":50.0,"organizations":2},"rc_catalog":{"RC-001":{"title":"Missing or broken project / playbook","description":"The job template has no project or playbook, or its project cannot be synchronised. AAP 2.6 validates the playbook against a synced project at creation time, so the import is rejected.","remediation":"Fix the project SCM URL / credential and run a successful sync on AAP 2.4, or delete the job template if it is no longer used.","post_migration_error":"API: Playbook not found for project / Job Template must have a project"},"RC-002":{"title":"Job template without inventory","description":"No inventory is assigned and 'Prompt on launch' for inventory is disabled (or a provisioning callback is enabled without an inventory). AAP 2.6 rejects these templates.","remediation":"Assign an inventory or enable 'Prompt on launch' for inventory on the source template before migrating.","post_migration_error":"API: Inventory required / Cannot enable provisioning callback without inventory"},"RC-003":{"title":"Schedule missing required survey variables","description":"In AAP 2.4 a schedule could omit required survey variables and rely on survey defaults. AAP 2.6 requires every required survey variable to be present in the schedule's extra_data.","remediation":"Add the listed variables (with their current default values) to the schedule's extra_data, or let the remediation playbook do it.","post_migration_error":"API: variables_needed_to_start"},"RC-004":{"title":"Schedule overrides a field not allowed on launch","description":"The schedule sets extra_data or a prompt (inventory, limit, tags, job type, ...) that the parent template no longer allows via 'Prompt on launch'. Usually the template was edited after the schedule was created. AAP 2.6 validates this at creation time.","remediation":"Enable the matching 'Prompt on launch' flag on the template or remove the override from the schedule.","post_migration_error":"API: Field not configured to prompt on launch / extra_data not allowed"},"RC-005":{"title":"Broken workflow graph","description":"One or more workflow nodes reference a template that was deleted (unified_job_template is null) or that is itself predicted to fail. The workflow cannot be imported until all node templates exist.","remediation":"Remove or re-point the broken nodes on AAP 2.4, or fix the failing node templates first.","post_migration_error":"Cannot import workflow: template(s) failed to import"},"RC-006":{"title":"Invalid inventory source configuration","description":"The inventory source is inconsistent: a cloud source without credential, source_path on a non-SCM source, an SCM source without project, or a source attached to a Smart inventory.","remediation":"Correct the source definition on AAP 2.4 (credential, source type, source project) or delete the orphaned source.","post_migration_error":"API: Credential required for cloud source / Cannot set source_path if not SCM type"},"RC-007":{"title":"Credential secrets (excluded — handled by migration tool)","description":"Credential secrets will be migrated using the dedicated secret migration tool that runs alongside the main migration. This root cause is excluded from the assessment.","remediation":"No action needed: secrets are handled automatically by the migration toolkit.","post_migration_error":"(silent) credential imported without secret"},"RC-008":{"title":"Duplicate identity collision","description":"Two source objects resolve to the same identity on the target (same name, organization and type, or usernames that differ only by case). Only the first occurrence is imported, the others are skipped.","remediation":"Rename or merge the duplicates on AAP 2.4 before migrating.","post_migration_error":"Duplicate exists in target / Skipped: Duplicate"},"RC-009":{"title":"Platform topology mismatch (VM → OpenShift)","description":"The object depends on the physical topology of the AAP 2.4 cluster (instance hostnames, VM instance groups, manual project paths on disk) or exceeds an organization host limit. These do not exist on AAP 2.6 running on OpenShift.","remediation":"Recreate instance groups as container groups, move manual projects to SCM, and review organization max_hosts.","post_migration_error":"API: Invalid hostname in policy_instance_list / Host subscription limit reached"},"RC-010":{"title":"Feature deprecated or removed in AAP 2.6","description":"The object uses a feature that changed between AAP 2.4 and 2.6: custom virtualenvs, Ansible 2.9 execution environments, Smart inventories, or API fields that no longer exist on the target schema.","remediation":"Move to a supported execution environment, convert Smart inventories to Constructed inventories, and review the removed fields.","post_migration_error":"Validation: field removed / field required"},"RC-011":{"title":"Identity & access model change (Platform Gateway)","description":"In AAP 2.6 users, teams and authentication move to the Platform Gateway. Users coming from LDAP / SAML / social auth need a Gateway authenticator, and legacy roles are translated, not copied.","remediation":"Configure the matching Gateway authenticator before the IAM phase and review the role mapping table.","post_migration_error":"IAM: user/role mapping"},"STALE":{"title":"Stale data (cleanup candidate)","description":"The object looks abandoned: never run, failing for a long time, disabled, empty, or pending deletion. Migrating it adds noise and often causes failures.","remediation":"Confirm with the owner and delete it on AAP 2.4 instead of migrating it.","post_migration_error":"(n/a)"}},"outcome_labels":{"will_fail":"Will fail","at_risk":"At risk","needs_action":"Needs action","stale":"Stale","ready":"Ready"},"organizations":{"Org A":{"total":4,"by_type":{"organizations":1,"projects":1,"job_templates":2},"outcomes":{"ready":2,"will_fail":2},"severity":{"critical":3,"low":2},"rc":{"RC-002":2,"STALE":2,"RC-001":1},"predicted_success_pct":50.0,"readiness_pct":50.0},"Org B":{"total":2,"by_type":{"organizations":1,"job_templates":1},"outcomes":{"ready":1,"will_fail":1},"severity":{"critical":1,"low":1},"rc":{"RC-002":1,"STALE":1},"predicted_success_pct":50.0,"readiness_pct":50.0}},"resources":{"job_templates:10":{"key":"job_templates:10","resource_type":"job_templates","id":10,"name":"jt-no-inv","organization":"Org A","outcome":"will_fail","stale":true,"rcs":["RC-002","STALE"],"modified":"","modified_by":"N/A","created_by":"N/A","last_job_run":"","last_job_failed":null,"sync_status":""},"job_templates:11":{"key":"job_templates:11","resource_type":"job_templates","id":11,"name":"jt-no-proj","organization":"Org A","outcome":"will_fail","stale":true,"rcs":["RC-001","RC-002","STALE"],"modified":"","modified_by":"N/A","created_by":"N/A","last_job_run":"","last_job_failed":null,"sync_status":""},"job_templates:12":{"key":"job_templates:12","resource_type":"job_templates","id":12,"name":"jt-b-no-inv","organization":"Org B","outcome":"will_fail","stale":true,"rcs":["RC-002","STALE"],"modified":"","modified_by":"N/A","created_by":"N/A","last_job_run":"","last_job_failed":null,"sync_status":""}},"findings":[{"rc":"RC-001","severity":"critical","resource_type":"job_templates","resource_id":11,"resource_name":"jt-no-proj","organization":"Org A","title":"Job template without project","detail":"No project is assigned (it was probably deleted). AAP 2.6 rejects job templates without a project.","remediation":"Assign an existing project on AAP 2.4 or delete the job template.","evidence":{},"cascade_from":null,"key":"job_templates:11"},{"rc":"RC-002","severity":"critical","resource_type":"job_templates","resource_id":10,"resource_name":"jt-no-inv","organization":"Org A","title":"No inventory and inventory not prompted","detail":"The template has no inventory and 'Prompt on launch' for inventory is disabled.","remediation":"Assign an inventory or enable 'Prompt on launch' for inventory on the source template before migrating.","evidence":{"ask_inventory_on_launch":false},"cascade_from":null,"key":"job_templates:10"},{"rc":"RC-002","severity":"critical","resource_type":"job_templates","resource_id":11,"resource_name":"jt-no-proj","organization":"Org A","title":"No inventory and inventory not prompted","detail":"The template has no inventory and 'Prompt on launch' for inventory is disabled.","remediation":"Assign an inventory or enable 'Prompt on launch' for inventory on the source template before migrating.","evidence":{"ask_inventory_on_launch":null},"cascade_from":null,"key":"job_templates:11"},{"rc":"RC-002","severity":"critical","resource_type":"job_templates","resource_id":12,"resource_name":"jt-b-no-inv","organization":"Org B","title":"No inventory and inventory not prompted","detail":"The template has no inventory and 'Prompt on launch' for inventory is disabled.","remediation":"Assign an inventory or enable 'Prompt on launch' for inventory on the source template before migrating.","evidence":{"ask_inventory_on_launch":false},"cascade_from":null,"key":"job_templates:12"},{"rc":"STALE","severity":"low","resource_type":"job_templates","resource_id":10,"resource_name":"jt-no-inv","organization":"Org A","title":"No inventory and inventory not prompted","detail":"Classified 'Probably Stale' by the same heuristics used by enhanced-report.","remediation":"Confirm with the owner and delete it on AAP 2.4 instead of migrating it.","evidence":{"modified_by":"N/A"},"cascade_from":null,"key":"job_templates:10"},{"rc":"STALE","severity":"low","resource_type":"job_templates","resource_id":11,"resource_name":"jt-no-proj","organization":"Org A","title":"Never run and no playbook","detail":"Classified 'Probably Stale' by the same heuristics used by enhanced-report.","remediation":"Confirm with the owner and delete it on AAP 2.4 instead of migrating it.","evidence":{"modified_by":"N/A"},"cascade_from":null,"key":"job_templates:11"},{"rc":"STALE","severity":"low","resource_type":"job_templates","resource_id":12,"resource_name":"jt-b-no-inv","organization":"Org B","title":"No inventory and inventory not prompted","detail":"Classified 'Probably Stale' by the same heuristics used by enhanced-report.","remediation":"Confirm with the owner and delete it on AAP 2.4 instead of migrating it.","evidence":{"modified_by":"N/A"},"cascade_from":null,"key":"job_templates:12"}]};
+
+const OUTCOMES = ['will_fail', 'at_risk', 'needs_action', 'stale', 'ready'];
+const OUTCOME_LABEL = {will_fail: 'Will fail', at_risk: 'At risk', needs_action: 'Needs action', stale: 'Stale', ready: 'Ready'};
+const TYPE_LABEL = {
+  organizations: 'Organizations', users: 'Users', teams: 'Teams', credential_types: 'Credential types',
+  credentials: 'Credentials', execution_environments: 'Execution environments', instance_groups: 'Instance groups',
+  projects: 'Projects', inventories: 'Inventories', inventory_sources: 'Inventory sources', hosts: 'Hosts',
+  inventory_groups: 'Groups', job_templates: 'Job templates', workflow_job_templates: 'Workflow templates',
+  schedules: 'Schedules', notification_templates: 'Notifications', credential_input_sources: 'Credential inputs'
+};
+function typeLabel(t) { return TYPE_LABEL[t] || String(t || '').replace(/_/g, ' '); }
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function fmtNum(n) { return (n || 0).toLocaleString('en-US'); }
+function fmtDate(ts) {
+  if (!ts) return '<span class="muted">—</span>';
+  const d = new Date(ts); if (isNaN(d)) return esc(ts);
+  return d.toISOString().slice(0, 10);
+}
+function ago(ts) {
+  if (!ts) return null; const d = new Date(ts); if (isNaN(d)) return null;
+  return Math.round((Date.now() - d.getTime()) / 86400000);
+}
+function pill(outcome) { return '<span class="pill o-' + outcome + '">' + esc(OUTCOME_LABEL[outcome] || outcome) + '</span>'; }
+function $(sel, root) { return (root || document).querySelector(sel); }
+function $all(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
+
+function initTheme() {
+  try { const t = localStorage.getItem('aapReportTheme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  const btn = $('#themeBtn'); if (!btn) return;
+  btn.addEventListener('click', () => {
+    const cur = document.documentElement.dataset.theme ||
+      (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem('aapReportTheme', next); } catch (e) {}
+  });
+}
+
+function initTabs(onShow) {
+  const tabs = $all('.tabs [role="tab"]');
+  function show(id, push) {
+    tabs.forEach(t => t.setAttribute('aria-selected', String(t.dataset.tab === id)));
+    $all('.panel').forEach(p => { p.hidden = p.id !== 'panel-' + id; });
+    if (push) history.replaceState(null, '', '#' + id);
+    if (onShow) onShow(id);
+  }
+  tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.tab, true)));
+  const initial = (location.hash || '').slice(1).split('?')[0];
+  show(tabs.some(t => t.dataset.tab === initial) ? initial : tabs[0].dataset.tab, false);
+  return show;
+}
+
+function renderStrip(el, counts, onPick) {
+  const total = OUTCOMES.reduce((a, k) => a + (counts[k] || 0), 0) || 1;
+  el.innerHTML = OUTCOMES.filter(k => counts[k]).map(k =>
+    '<div class="seg" tabindex="0" role="button" data-o="' + k + '" style="flex:' + counts[k] + ';background:var(--' + k + ')" ' +
+    'title="' + OUTCOME_LABEL[k] + ': ' + fmtNum(counts[k]) + ' (' + (100 * counts[k] / total).toFixed(1) + '%)"></div>').join('');
+  if (onPick) $all('.seg', el).forEach(s => {
+    s.addEventListener('click', () => onPick(s.dataset.o));
+    s.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(s.dataset.o); } });
+  });
+}
+function renderLegend(el, counts, onPick) {
+  el.innerHTML = OUTCOMES.map(k =>
+    '<button type="button" data-o="' + k + '"><span class="dot" style="background:var(--' + k + ')"></span>' +
+    '<span class="n">' + fmtNum(counts[k] || 0) + '</span><span class="l">' + OUTCOME_LABEL[k] + '</span></button>').join('');
+  if (onPick) $all('button', el).forEach(b => b.addEventListener('click', () => onPick(b.dataset.o)));
+}
+
+function renderHBars(el, rows, opts) {
+  opts = opts || {};
+  const max = Math.max(1, ...rows.map(r => r.total));
+  if (!rows.length) { el.innerHTML = '<p class="muted small">No data to display.</p>'; return; }
+  el.innerHTML = '<div class="hbars' + (opts.wrap ? ' wrap-labels' : '') + '">' + rows.map((r, i) => {
+    const parts = OUTCOMES.filter(k => r.parts[k]).map(k =>
+      '<span title="' + OUTCOME_LABEL[k] + ': ' + r.parts[k] + '" style="width:' + (100 * r.parts[k] / max) + '%;background:var(--' + k + ')"></span>').join('');
+    const text = r.html || esc(r.label);
+    const lbl = opts.onClick ? '<button type="button" data-i="' + i + '">' + text + '</button>' : text;
+    return '<div class="lbl" title="' + esc(r.label) + '">' + lbl + '</div><div class="track">' + parts + '</div><div class="val">' + fmtNum(r.value !== undefined ? r.value : r.total) + '</div>';
+  }).join('') + '</div>';
+  if (opts.onClick) $all('button[data-i]', el).forEach(b => b.addEventListener('click', () => opts.onClick(rows[+b.dataset.i])));
+}
+
+function DataTable(container, columns, opts) {
+  opts = opts || {};
+  const pageSize = opts.pageSize || 100;
+  let rows = [], page = 0, sortKey = opts.sortKey || null, sortDir = opts.sortDir || 1;
+  container.innerHTML = '<div class="table-wrap"><table class="data"><thead><tr></tr></thead><tbody></tbody></table></div><div class="pager"></div>';
+  const thead = $('thead tr', container), tbody = $('tbody', container), pager = $('.pager', container);
+  thead.innerHTML = columns.map(c => '<th class="' + (c.sort === false ? '' : 'sortable ') + (c.cls || '') + '" data-k="' + c.key + '" scope="col">' + esc(c.label) + '<span class="arrow"></span></th>').join('');
+  $all('th.sortable', thead).forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.k; sortDir = (sortKey === k) ? -sortDir : 1; sortKey = k; apply(); draw();
+  }));
+  function val(row, k) { const c = columns.find(c => c.key === k); return c && typeof c.sort === 'function' ? c.sort(row) : row[k]; }
+  function apply() {
+    if (!sortKey) return;
+    rows.sort((a, b) => {
+      let x = val(a, sortKey), y = val(b, sortKey);
+      if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+      if (typeof x === 'string') x = x.toLowerCase(); if (typeof y === 'string') y = y.toLowerCase();
+      return x < y ? -sortDir : x > y ? sortDir : 0;
+    });
+  }
+  function draw() {
+    $all('th', thead).forEach(th => { $('.arrow', th).textContent = th.dataset.k === sortKey ? (sortDir > 0 ? ' ↑' : ' ↓') : ''; });
+    const pages = Math.max(1, Math.ceil(rows.length / pageSize)); if (page >= pages) page = pages - 1;
+    const slice = rows.slice(page * pageSize, (page + 1) * pageSize);
+    tbody.innerHTML = slice.length ? slice.map((r, i) => '<tr class="' + (opts.onRow ? 'clickable' : '') + '" data-i="' + (page * pageSize + i) + '" ' + (opts.onRow ? 'tabindex="0"' : '') + '>' +
+      columns.map(c => '<td class="' + (c.cls || '') + '">' + (c.render ? c.render(r) : esc(r[c.key])) + '</td>').join('') + '</tr>').join('')
+      : '<tr><td colspan="' + columns.length + '"><div class="empty">' + esc(opts.empty || 'No matching rows. Clear a filter to see more.') + '</div></td></tr>';
+    if (opts.onRow) $all('tr.clickable', tbody).forEach(tr => {
+      tr.addEventListener('click', () => opts.onRow(rows[+tr.dataset.i]));
+      tr.addEventListener('keydown', e => { if (e.key === 'Enter') opts.onRow(rows[+tr.dataset.i]); });
+    });
+    pager.innerHTML = pages > 1 ? '<button class="btn" data-p="-1"' + (page === 0 ? ' disabled' : '') + '>← Previous</button><span>Page ' + (page + 1) + ' / ' + pages + '</span><button class="btn" data-p="1"' + (page >= pages - 1 ? ' disabled' : '') + '>Next →</button>' : '';
+    $all('button[data-p]', pager).forEach(b => b.addEventListener('click', () => { page += +b.dataset.p; draw(); container.scrollIntoView({block: 'start'}); }));
+  }
+  return { set(newRows) { rows = newRows.slice(); page = 0; apply(); draw(); }, rows() { return rows; } };
+}
+
+function openDrawer(html) {
+  const d = $('#drawer'), bg = $('#drawerBg');
+  $('#drawerBody').innerHTML = html; bg.hidden = false;
+  requestAnimationFrame(() => d.classList.add('open'));
+  d.setAttribute('aria-hidden', 'false'); $('#drawerClose').focus();
+}
+function closeDrawer() {
+  const d = $('#drawer'); d.classList.remove('open'); d.setAttribute('aria-hidden', 'true'); $('#drawerBg').hidden = true;
+}
+function initDrawer() {
+  $('#drawerClose').addEventListener('click', closeDrawer);
+  $('#drawerBg').addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+}
+
+function downloadCSV(filename, header, rows) {
+  const q = v => { const s = v === null || v === undefined ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const csv = [header.map(q).join(',')].concat(rows.map(r => r.map(q).join(','))).join('\n');
+  const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+}
+function fillSelect(sel, values, allLabel, labelFn) {
+  sel.innerHTML = '<option value="">' + esc(allLabel) + '</option>' + values.map(v => '<option value="' + esc(v) + '">' + esc(labelFn ? labelFn(v) : v) + '</option>').join('');
+}
+
+
+const SEV_TO_OUTCOME = {critical: 'will_fail', high: 'at_risk', medium: 'needs_action', low: 'stale', info: 'ready'};
+const S = REPORT.summary;
+const FINDINGS = REPORT.findings.map(f => Object.assign(f, {outcome: f.rc === 'STALE' ? 'stale' : SEV_TO_OUTCOME[f.severity]}));
+const RES = REPORT.resources;
+const byRes = {};
+FINDINGS.forEach(f => { (byRes[f.key] = byRes[f.key] || []).push(f); });
+let showTab;
+
+/* ── Header / Success section ─────────────────────── */
+function header() {
+  const total = S.total_resources, out = S.outcomes;
+  $('#successPct').textContent = S.predicted_success_pct + '%';
+  $('#successTitle').innerHTML = 'Based on analysis of <strong>' + fmtNum(total) + ' objects</strong> across <strong>' + fmtNum(S.organizations) + ' organizations</strong>, ' +
+    fmtNum(out.will_fail || 0) + ' will be rejected by AAP 2.6 and ' + fmtNum(out.at_risk || 0) + ' more are at risk.';
+  const items = [
+    {k: 'will_fail', label: 'Will fail'},
+    {k: 'at_risk', label: 'At risk'},
+    {k: 'needs_action', label: 'Needs action'},
+    {k: 'stale', label: 'Stale'},
+    {k: 'ready', label: 'Ready'}
+  ];
+  $('#outcomeRow').innerHTML = items.map(i =>
+    '<div class="outcome-item"><span class="o-dot" style="background:var(--' + i.k + ')"></span>' +
+    '<span class="o-val">' + fmtNum(out[i.k] || 0) + '</span><span class="o-lbl">' + i.label + '</span></div>'
+  ).join('');
+  const pick = o => { if (o === 'ready') return; if (o === 'stale') { showTab('stale', true); return; } setFilters({impact: o}); showTab('findings', true); };
+  renderStrip($('#strip'), out, pick);
+  renderLegend($('#legend'), out, pick);
+  $('#cFindings').textContent = fmtNum(FINDINGS.filter(f => f.rc !== 'STALE').length);
+  $('#cStale').textContent = fmtNum(Object.values(RES).filter(r => r.stale).length);
+  $('#cOrgs').textContent = fmtNum(Object.keys(REPORT.organizations).length);
+}
+
+/* ── Stat cards ───────────────────────────────────── */
+function statCards() {
+  const out = S.outcomes;
+  const cards = [
+    {value: fmtNum(S.total_resources), label: 'Total objects', color: ''},
+    {value: fmtNum(out.will_fail || 0), label: 'Will fail', color: 'var(--will_fail)'},
+    {value: fmtNum(out.at_risk || 0), label: 'At risk', color: 'var(--at_risk)'},
+    {value: fmtNum(out.needs_action || 0), label: 'Needs action', color: 'var(--needs_action)'},
+    {value: fmtNum(out.stale || 0), label: 'Stale', color: 'var(--stale)'},
+    {value: fmtNum(out.ready || 0), label: 'Ready', color: 'var(--ready)'},
+  ];
+  $('#statCards').innerHTML = cards.map(c =>
+    '<div class="stat-card"><div class="stat-value"' + (c.color ? ' style="color:' + c.color + '"' : '') + '>' + c.value + '</div><div class="stat-label">' + c.label + '</div></div>'
+  ).join('');
+}
+
+/* ── Overview ─────────────────────────────────────── */
+function overview() {
+  const rcRows = Object.keys(REPORT.rc_catalog).filter(rc => rc !== 'STALE' && S.resources_by_rc[rc]).map(rc => {
+    const parts = {}; FINDINGS.filter(f => f.rc === rc).forEach(f => { parts[f.outcome] = (parts[f.outcome] || 0) + 1; });
+    return {label: rc + ' — ' + REPORT.rc_catalog[rc].title, html: '<span class="rc">' + rc + '</span> ' + esc(REPORT.rc_catalog[rc].title), parts, total: Object.values(parts).reduce((a, b) => a + b, 0), value: S.resources_by_rc[rc], rc};
+  }).sort((a, b) => (b.parts.will_fail || 0) - (a.parts.will_fail || 0) || b.total - a.total);
+  renderHBars($('#rcBars'), rcRows, {wrap: true, onClick: r => { setFilters({rc: r.rc}); showTab('findings', true); }});
+
+  const typeRows = Object.keys(S.inventory_counts).map(t => {
+    const flagged = S.outcomes_by_type[t] || {}; const parts = Object.assign({}, flagged);
+    const n = Object.values(flagged).reduce((a, b) => a + b, 0); parts.ready = (parts.ready || 0) + Math.max(0, S.inventory_counts[t] - n);
+    return {label: typeLabel(t), parts, total: S.inventory_counts[t], t};
+  }).sort((a, b) => b.total - a.total);
+  renderHBars($('#typeBars'), typeRows, {onClick: r => { setFilters({type: r.t}); showTab('findings', true); }});
+
+  const orgRows = Object.entries(REPORT.organizations).map(([name, o]) => ({
+    label: name, parts: {will_fail: o.outcomes.will_fail || 0, at_risk: o.outcomes.at_risk || 0},
+    total: (o.outcomes.will_fail || 0) + (o.outcomes.at_risk || 0), name
+  })).filter(r => r.total).sort((a, b) => b.total - a.total).slice(0, 10);
+  renderHBars($('#orgBars'), orgRows, {onClick: r => { setFilters({org: r.name}); showTab('findings', true); }});
+}
+
+/* ── Findings tab ─────────────────────────────────── */
+let fTable, rootOnly = false;
+function setFilters(f) {
+  $('#fImpact').value = f.impact || ''; $('#fRc').value = f.rc || ''; $('#fType').value = f.type || ''; $('#fOrg').value = f.org || '';
+  $('#fSearch').value = f.q || ''; filterFindings();
+}
+function filterFindings() {
+  const q = $('#fSearch').value.trim().toLowerCase(), imp = $('#fImpact').value, rc = $('#fRc').value, t = $('#fType').value, org = $('#fOrg').value;
+  const allFiltered = FINDINGS.filter(f => f.rc !== 'STALE' || rc === 'STALE').filter(f =>
+    (!imp || f.outcome === imp) && (!rc || f.rc === rc) && (!t || f.resource_type === t) && (!org || f.organization === org) &&
+    (!q || (f.resource_name + ' ' + f.title + ' ' + f.detail + ' ' + f.resource_id).toLowerCase().includes(q)));
+  const beforeRoot = allFiltered.length;
+  const rows = rootOnly ? allFiltered.filter(f => !f.cascade_from) : allFiltered;
+  fTable.set(rows);
+  const hidden = beforeRoot - rows.length;
+  let countText = fmtNum(rows.length) + ' findings';
+  if (rootOnly && hidden > 0) countText += ' (hiding ' + hidden + ' knock-on)';
+  $('#fCount').textContent = countText;
+}
+function findingsTab() {
+  fillSelect($('#fImpact'), ['will_fail', 'at_risk', 'needs_action', 'stale'], 'Any impact', o => OUTCOME_LABEL[o]);
+  fillSelect($('#fRc'), Object.keys(REPORT.rc_catalog).filter(rc => S.findings_by_rc[rc]), 'All root causes', rc => rc + ' — ' + REPORT.rc_catalog[rc].title);
+  fillSelect($('#fType'), [...new Set(FINDINGS.map(f => f.resource_type))].sort(), 'All types', typeLabel);
+  fillSelect($('#fOrg'), [...new Set(FINDINGS.map(f => f.organization))].sort(), 'All organizations');
+  fTable = DataTable($('#findingsTable'), [
+    {key: 'outcome', label: 'Impact', render: f => pill(f.outcome), sort: f => ({critical: 0, high: 1, medium: 2, low: 3, info: 4})[f.severity]},
+    {key: 'rc', label: 'Cause', render: f => '<span class="rc" title="' + esc(REPORT.rc_catalog[f.rc].title) + '">' + esc(f.rc) + '</span>'},
+    {key: 'resource_name', label: 'Resource', render: f => '<strong>' + esc(f.resource_name) + '</strong><div class="muted small">' + esc(typeLabel(f.resource_type)) + ' #' + esc(f.resource_id) + '</div>'},
+    {key: 'organization', label: 'Org'},
+    {key: 'title', label: 'Problem', render: f => esc(f.title) + (f.cascade_from ? ' <span class="tag">knock-on</span>' : '')},
+    {key: 'modified', label: 'Changed', render: f => { const r = RES[f.key] || {}; return fmtDate(r.modified); }, sort: f => (RES[f.key] || {}).modified || ''}
+  ], {onRow: f => openResource(f.key), sortKey: 'outcome'});
+
+  const cascadeBtn = $('#fCascade');
+  cascadeBtn.addEventListener('click', function() {
+    rootOnly = !rootOnly;
+    this.setAttribute('aria-pressed', String(rootOnly));
+    filterFindings();
+  });
+
+  ['fSearch', 'fImpact', 'fRc', 'fType', 'fOrg'].forEach(id => $('#' + id).addEventListener('input', filterFindings));
+  $('#fReset').addEventListener('click', () => {
+    rootOnly = false;
+    $('#fCascade').setAttribute('aria-pressed', 'false');
+    setFilters({});
+  });
+  $('#fCsv').addEventListener('click', () => downloadCSV('premigration-findings.csv',
+    ['Impact', 'Root cause', 'Root cause title', 'Resource type', 'Resource ID', 'Resource', 'Organization', 'Problem', 'Detail', 'Remediation', 'Caused by', 'Last modified', 'Modified by'],
+    fTable.rows().map(f => { const r = RES[f.key] || {}; return [OUTCOME_LABEL[f.outcome], f.rc, REPORT.rc_catalog[f.rc].title, f.resource_type, f.resource_id, f.resource_name, f.organization, f.title, f.detail, f.remediation, f.cascade_from || '', r.modified || '', r.modified_by || '']; })));
+  filterFindings();
+}
+
+/* ── Stale tab ────────────────────────────────────── */
+let sTable;
+function staleTab() {
+  const stale = Object.values(RES).filter(r => r.stale).map(r => Object.assign({}, r, {reason: ((byRes[r.key] || []).find(f => f.rc === 'STALE') || {}).title || ''}));
+  $('#staleIntro').textContent = fmtNum(stale.length) + ' objects appear abandoned — never run, failing for months, disabled, or empty. Consider deleting them on AAP 2.4 instead of carrying them into 2.6.';
+  fillSelect($('#sType'), [...new Set(stale.map(r => r.resource_type))].sort(), 'All types', typeLabel);
+  fillSelect($('#sOrg'), [...new Set(stale.map(r => r.organization))].sort(), 'All organizations');
+  sTable = DataTable($('#staleTable'), [
+    {key: 'name', label: 'Resource', render: r => '<strong>' + esc(r.name) + '</strong><div class="muted small">' + esc(typeLabel(r.resource_type)) + ' #' + esc(r.id) + '</div>'},
+    {key: 'organization', label: 'Org'},
+    {key: 'reason', label: 'Reason'},
+    {key: 'last_job_run', label: 'Last run', render: r => fmtDate(r.last_job_run)},
+    {key: 'modified', label: 'Changed', render: r => fmtDate(r.modified)},
+    {key: 'outcome', label: 'If migrated', render: r => pill(r.outcome === 'stale' ? 'ready' : r.outcome)}
+  ], {onRow: r => openResource(r.key), sortKey: 'modified'});
+  const apply = () => {
+    const q = $('#sSearch').value.trim().toLowerCase(), t = $('#sType').value, o = $('#sOrg').value;
+    const rows = stale.filter(r => (!t || r.resource_type === t) && (!o || r.organization === o) && (!q || (r.name + ' ' + r.modified_by + ' ' + r.created_by).toLowerCase().includes(q)));
+    sTable.set(rows); $('#sCount').textContent = fmtNum(rows.length) + ' stale objects';
+  };
+  ['sSearch', 'sType', 'sOrg'].forEach(id => $('#' + id).addEventListener('input', apply));
+  $('#sCsv').addEventListener('click', () => downloadCSV('premigration-stale-cleanup.csv',
+    ['Resource type', 'Resource ID', 'Name', 'Organization', 'Reason', 'Last run', 'Last run failed', 'Last modified', 'Modified by', 'Created by', 'Would also fail import'],
+    sTable.rows().map(r => [r.resource_type, r.id, r.name, r.organization, r.reason, r.last_job_run || '', r.last_job_failed ? 'yes' : '', r.modified || '', r.modified_by, r.created_by, r.outcome === 'will_fail' ? 'yes' : ''])));
+  apply();
+}
+
+/* ── Organizations tab ────────────────────────────── */
+function orgsTab() {
+  const rows = Object.entries(REPORT.organizations).map(([name, o]) => Object.assign({name}, o, {
+    wf: o.outcomes.will_fail || 0, ar: o.outcomes.at_risk || 0, na: o.outcomes.needs_action || 0, st: o.outcomes.stale || 0}));
+  const t = DataTable($('#orgTable'), [
+    {key: 'name', label: 'Organization', render: r => '<strong>' + esc(r.name) + '</strong>'},
+    {key: 'total', label: 'Objects', cls: 'num', render: r => fmtNum(r.total)},
+    {key: 'wf', label: 'Will fail', cls: 'num', render: r => r.wf ? '<span style="color:var(--will_fail);font-weight:600">' + fmtNum(r.wf) + '</span>' : '<span class="muted">0</span>'},
+    {key: 'ar', label: 'At risk', cls: 'num', render: r => r.ar ? '<span style="color:var(--at_risk)">' + fmtNum(r.ar) + '</span>' : '<span class="muted">0</span>'},
+    {key: 'na', label: 'Needs action', cls: 'num', render: r => r.na ? fmtNum(r.na) : '<span class="muted">0</span>'},
+    {key: 'st', label: 'Stale', cls: 'num', render: r => r.st ? fmtNum(r.st) : '<span class="muted">0</span>'},
+    {key: 'predicted_success_pct', label: 'Success', cls: 'num', render: r => r.predicted_success_pct + '%'},
+    {key: 'mix', label: '', sort: false, render: r => '<div class="strip" style="height:6px;min-width:100px">' + OUTCOMES.filter(k => r.outcomes[k]).map(k => '<div class="seg" style="flex:' + r.outcomes[k] + ';background:var(--' + k + ');border-right-width:1px"></div>').join('') + '</div>'}
+  ], {onRow: r => { setFilters({org: r.name}); showTab('findings', true); }, sortKey: 'wf', sortDir: -1});
+  const apply = () => { const q = $('#oSearch').value.trim().toLowerCase(); const f = rows.filter(r => !q || r.name.toLowerCase().includes(q)); t.set(f); $('#oCount').textContent = fmtNum(f.length) + ' organizations'; };
+  $('#oSearch').addEventListener('input', apply); apply();
+}
+
+/* ── Root causes tab ──────────────────────────────── */
+function causesTab() {
+  $('#causes').innerHTML = Object.entries(REPORT.rc_catalog).map(([rc, c]) => {
+    const n = S.resources_by_rc[rc] || 0;
+    return '<article class="card">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px">' +
+        '<h3><span class="rc" style="font-size:0.8125rem">' + esc(rc) + '</span> ' + esc(c.title) + '</h3>' +
+        '<span class="muted small" style="white-space:nowrap">' + fmtNum(n) + ' objects</span>' +
+      '</div>' +
+      '<p class="small" style="color:var(--ink-2)">' + esc(c.description) + '</p>' +
+      '<p class="small muted" style="margin-top:10px"><strong>Remediation:</strong> ' + esc(c.remediation) + '</p>' +
+      (n ? '<p style="margin-top:12px"><button class="btn" type="button" data-rc="' + esc(rc) + '">View affected objects →</button></p>' : '') +
+    '</article>';
+  }).join('');
+  $all('button[data-rc]', $('#causes')).forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.rc === 'STALE') { showTab('stale', true); return; } setFilters({rc: b.dataset.rc}); showTab('findings', true); }));
+}
+
+/* ── Drawer (resource detail) ─────────────────────── */
+function openResource(key) {
+  const r = RES[key] || {}; const fs = byRes[key] || [];
+  let h = '<p class="muted small" style="margin-bottom:2px">' + esc(typeLabel(r.resource_type)) + ' #' + esc(r.id) + '</p>' +
+    '<h2 style="margin-bottom:8px;padding-right:40px">' + esc(r.name) + '</h2>' + pill(r.outcome) +
+    '<dl>' +
+      '<dt>Organization</dt><dd>' + esc(r.organization) + '</dd>' +
+      '<dt>Last changed</dt><dd>' + fmtDate(r.modified) + ' by ' + esc(r.modified_by) + '</dd>' +
+      '<dt>Created by</dt><dd>' + esc(r.created_by) + '</dd>' +
+      '<dt>Last run</dt><dd>' + fmtDate(r.last_job_run) + (r.last_job_failed ? ' <span class="muted">(failed)</span>' : '') + '</dd>' +
+      (r.sync_status ? '<dt>Status</dt><dd>' + esc(r.sync_status) + '</dd>' : '') +
+    '</dl>';
+  fs.forEach(f => {
+    h += '<div class="finding" style="border-left-color:var(--' + f.outcome + ')">' +
+      '<p><span class="rc">' + esc(f.rc) + '</span> <strong>' + esc(f.title) + '</strong></p>' +
+      '<p class="small" style="color:var(--ink-2)">' + esc(f.detail) + '</p>' +
+      '<p class="small muted" style="margin-top:4px"><strong>Fix:</strong> ' + esc(f.remediation) + '</p>' +
+      (f.cascade_from ? '<p class="small">Caused by <button class="btn" type="button" data-open="' + esc(f.cascade_from) + '">' + esc(f.cascade_from) + '</button></p>' : '') +
+      (f.evidence && Object.keys(f.evidence).length ? '<pre>' + esc(JSON.stringify(f.evidence, null, 2)) + '</pre>' : '') +
+    '</div>';
+  });
+  openDrawer(h);
+  $all('button[data-open]', $('#drawerBody')).forEach(b => b.addEventListener('click', () => { if (RES[b.dataset.open]) openResource(b.dataset.open); }));
+}
+
+/* ── Init ─────────────────────────────────────────── */
+initTheme(); initDrawer();
+findingsTab(); staleTab(); orgsTab(); causesTab(); overview(); statCards();
+showTab = initTabs(); header();
+
+</script>
+</body>
+</html>

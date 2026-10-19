@@ -1,0 +1,11 @@
+{
+  "organizations": [{"id": 1, "name": "Org A"}, {"id": 2, "name": "Org B"}],
+  "projects": [
+    {"id": 5, "name": "proj-ok", "organization": 1, "scm_type": "git", "scm_url": "https://git.example.com/a.git", "status": "successful"}
+  ],
+  "job_templates": [
+    {"id": 10, "name": "jt-no-inv", "organization": 1, "project": 5, "playbook": "site.yml", "inventory": null, "ask_inventory_on_launch": false},
+    {"id": 11, "name": "jt-no-proj", "organization": 1, "project": null, "playbook": "", "inventory": null},
+    {"id": 12, "name": "jt-b-no-inv", "organization": 2, "project": 5, "playbook": "site.yml", "inventory": null, "ask_inventory_on_launch": false}
+  ]
+}

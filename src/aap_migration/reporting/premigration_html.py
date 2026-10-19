@@ -342,6 +342,31 @@ showTab = initTabs(); header();
 """
 
 
+# Appended only when the report carries AI explanations (C7), so the page is
+# byte-identical to the rule-only report when AI is off.
+_AI_EXPLANATIONS_SCRIPT = r"""
+/* ── AI explanations (optional) ───────────────────── */
+(function aiExplanations() {
+  const AI = REPORT.ai_explanations || {};
+  const cards = $('#causes').children;
+  Object.keys(REPORT.rc_catalog).forEach((rc, i) => {
+    const e = AI[rc]; const card = cards[i];
+    if (!e || !card) return;
+    const note = document.createElement('div');
+    note.className = 'ai-explanation';
+    note.style.cssText = 'margin-top:12px;padding:10px 12px;border-left:3px solid var(--focus);background:var(--line-2)';
+    note.innerHTML =
+      '<p class="small muted" style="margin-bottom:4px"><strong>AI explanation</strong> · confidence ' + esc(e.confidence) + '</p>' +
+      '<p class="small">' + esc(e.summary) + '</p>' +
+      '<p class="small" style="color:var(--ink-2);margin-top:6px"><strong>Why it fails:</strong> ' + esc(e.why_it_fails) + '</p>' +
+      '<p class="small" style="color:var(--ink-2);margin-top:6px"><strong>What to do:</strong> ' + esc(e.operator_action) + '</p>';
+    const button = card.querySelector('button[data-rc]');
+    card.insertBefore(note, button ? button.parentNode : null);
+  });
+})();
+"""
+
+
 def render_premigration_html(report: dict[str, Any]) -> str:
     src = report.get("source", {})
     body = (
@@ -349,4 +374,5 @@ def render_premigration_html(report: dict[str, Any]) -> str:
         .replace("__SRC_URL__", escape(str(src.get("url") or "source AAP")))
         .replace("__GENERATED__", escape(str(report.get("generated", ""))[:16].replace("T", " ")))
     )
-    return page("Pre-migration Assessment", body, _SCRIPT, {"REPORT": report})
+    script = _SCRIPT + _AI_EXPLANATIONS_SCRIPT if report.get("ai_explanations") else _SCRIPT
+    return page("Pre-migration Assessment", body, script, {"REPORT": report})

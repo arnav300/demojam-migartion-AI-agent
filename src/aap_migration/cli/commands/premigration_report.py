@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import csv as csv_module
+import dataclasses
 import json
 import re
 from collections import Counter
@@ -33,6 +34,8 @@ from pathlib import Path
 
 import click
 
+from aap_migration.ai.client import is_enabled as ai_is_enabled
+from aap_migration.ai.explain import CACHE_FILENAME, explain_findings
 from aap_migration.analysis.premigration import (
     OUTCOME_LABELS,
     RC_CATALOG,
@@ -94,6 +97,32 @@ def filter_report_by_org(report: dict, organization: str) -> dict:
     report.update({"findings": findings, "resources": resources, "organizations": orgs})
     report["filter"] = {"organization": sorted(wanted)[0]}
     return report
+
+
+def _add_ai_explanations(
+    report: dict, result, use_ai: bool | None, output_dir: Path, scoped: bool
+) -> None:
+    """Attach ``report["ai_explanations"]`` (C7) when AI is on; otherwise leave the report as is."""
+    enabled = ai_is_enabled()
+    if use_ai is None:
+        use_ai = enabled
+    if not use_ai:
+        return
+    if not enabled:
+        echo_warning("--ai given but AI_ENDPOINT is not set: continuing without AI explanations.")
+        return
+    if scoped:
+        # Only the filtered organization's findings may reach the prompt.
+        result = dataclasses.replace(
+            result, findings=[f for f in result.findings if f.organization in report["organizations"]]
+        )
+    echo_info("Asking the AI model to explain each root cause ...")
+    explanations = explain_findings(result, cache_path=output_dir / CACHE_FILENAME)
+    if explanations:
+        report["ai_explanations"] = {rc: e.model_dump() for rc, e in explanations.items()}
+        echo_info(f"AI explanations added for {len(explanations)} root causes")
+    else:
+        echo_warning("No AI explanations available; the report shows the rule-based text only.")
 
 
 def format_markdown(report: dict) -> str:
@@ -208,6 +237,8 @@ def print_console_summary(report: dict) -> None:
 @click.option("--include-healthy", is_flag=True, help="Also list objects with no findings in the JSON/HTML.")
 @click.option("--fail-on-blocking", is_flag=True,
               help="Exit with code 3 when objects are predicted to fail (useful in pipelines).")
+@click.option("--ai/--no-ai", "use_ai", default=None,
+              help="Add AI explanations per root cause (default: on when AI_ENDPOINT is set).")
 @pass_context
 @requires_config
 @handle_errors
@@ -222,6 +253,7 @@ def generate_premigration_report(
     schema_comparison: Path | None,
     include_healthy: bool,
     fail_on_blocking: bool,
+    use_ai: bool | None = None,
 ) -> None:
     """Predict migration failures and stale data from the AAP 2.4 source.
 
@@ -314,6 +346,8 @@ def generate_premigration_report(
     report = build_report_dict(result)
     if organization:
         report = filter_report_by_org(report, organization)
+
+    _add_ai_explanations(report, result, use_ai, output_dir, scoped=bool(organization))
 
     base = name
     if organization:
