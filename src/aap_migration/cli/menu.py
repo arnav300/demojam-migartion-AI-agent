@@ -6,6 +6,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 
+from aap_migration.ai.client import is_enabled as ai_is_enabled
 from aap_migration.cli.import_menu import import_submenu
 
 
@@ -42,6 +43,7 @@ def interactive_menu(ctx: Any) -> None:
                 "3. Transform (All)\n"
                 "4. Import Resources (Enhanced)\n"
                 "5. Cleanup\n"
+                "6. After Migration (Failures, Remediation, Reports, Dashboard)\n"
                 "q. Quit",
                 title="Main Menu",
                 border_style="blue",
@@ -49,7 +51,7 @@ def interactive_menu(ctx: Any) -> None:
         )
 
         choice = Prompt.ask(
-            "Select an option", choices=["1", "2", "p", "3", "4", "5", "q"], default="q"
+            "Select an option", choices=["1", "2", "p", "3", "4", "5", "6", "q"], default="q"
         )
 
         if choice.lower() == "q":
@@ -74,6 +76,8 @@ def interactive_menu(ctx: Any) -> None:
         elif choice == "5":
             run_command(["cleanup"], ctx)
             Prompt.ask("\nPress Enter to return to menu...")
+        elif choice == "6":
+            post_migration_submenu(ctx)
 
 
 def premigration_submenu(ctx: Any) -> None:
@@ -121,4 +125,45 @@ def premigration_submenu(ctx: Any) -> None:
             run_command(["premigration-report", "--format", "all"], ctx)
             run_command(["analyze-dependencies", "--all", "--output-html", deps_html,
                          "--output-json", deps_json, "--risk-report", risk_json], ctx)
+        Prompt.ask("\nPress Enter to return to menu...")
+
+
+def post_migration_submenu(ctx: Any) -> None:
+    """After migration: classify failures, draft remediation, reports and live dashboard."""
+    console = Console()
+    report_dir = "reports"
+    try:
+        report_dir = ctx.obj.config.paths.report_dir
+    except Exception:
+        pass
+    classification = f"{report_dir}/classification.json"
+    ai_state = "[green]on[/green]" if ai_is_enabled() else "[dim]off (AI_ENDPOINT not set)[/dim]"
+
+    while True:
+        console.clear()
+        console.print(
+            Panel.fit(
+                "[bold cyan]After Migration[/bold cyan] [dim](reads the state database)[/dim]\n"
+                f"AI layer: {ai_state}\n\n"
+                "1. Enhanced report (HTML, with AI summary when on)\n"
+                "2. Classify failures by root cause (JSON + CSV)\n"
+                "3. Remediation playbooks from the classification (check mode)\n"
+                "4. Live dashboard on port 8080 (Ctrl+C to stop)\n"
+                "b. Back",
+                title="After Migration",
+                border_style="cyan",
+            )
+        )
+        choice = Prompt.ask("Select an option", choices=["1", "2", "3", "4", "b"], default="b")
+        if choice == "b":
+            return
+        console.print()
+        if choice == "1":
+            run_command(["enhanced-report"], ctx)
+        elif choice == "2":
+            run_command(["classify-failures", "--output-dir", report_dir], ctx)
+        elif choice == "3":
+            run_command(["remediate", "--from", classification, "--out", "remediation"], ctx)
+        elif choice == "4":
+            run_command(["dashboard", "--port", "8080"], ctx)
         Prompt.ask("\nPress Enter to return to menu...")

@@ -712,6 +712,49 @@ exports/
 
 ```
 
+## DemoJam AI layer
+
+An **optional** layer on top of the toolkit. It uses IBM Granite, served by vLLM on OpenShift AI, through an OpenAI-compatible `/v1/chat/completions` endpoint.
+
+Deterministic rules always decide the root-cause code (RC-001 … RC-011). The model only explains, summarises and drafts, and nothing it generates is ever applied to an AAP instance automatically. Every model answer is validated against a pydantic schema (`src/aap_migration/ai/schemas.py`); an invalid answer is retried once and then dropped.
+
+| Component | Command | With AI on |
+| --- | --- | --- |
+| C7 risk explanations | `aap-migrate premigration-report [--ai/--no-ai]` | Plain-English explanation per RC section, cached in `<report-dir>/ai_cache.json` |
+| C8 failure classification | `aap-migrate classify-failures [--db FILE] [--output-dir DIR]` | Explanation and confidence per `(rc_code, error_key)` group; RC codes always come from the rules |
+| C9 executive summary | `enhanced-report` / `premigration-report` | "Summary" panel at the top of the HTML. Numbers come from our data; the model only writes the sentences |
+| C10 remediation | `aap-migrate remediate --from classification.json --out remediation/` | Granite drafts a playbook per RC code. It must pass static checks, `ansible-playbook --syntax-check` and `ansible-lint`, or the template in `remediation/templates/` is used |
+| C11 live dashboard | `aap-migrate dashboard --port 8080` | No AI. Source, target and migrated counts per resource type, refreshed every 5 s |
+
+### Configuration
+
+Add these to `.env` (they're already in `.env.example`). With `AI_ENDPOINT` unset or empty, every command, report and test behaves exactly as without the AI layer.
+
+```bash
+AI_ENDPOINT=https://<granite-inferenceservice-url>   # /v1/chat/completions is appended
+AI_MODEL=<model id from /v1/models>
+AI_TOKEN=<token>                                      # optional bearer token
+AI_TIMEOUT_SECONDS=30
+```
+
+Each AI-capable command also accepts `--ai/--no-ai`. The default is on when `AI_ENDPOINT` is set; `--no-ai` forces the rule-only output.
+
+### Try it
+
+```bash
+# Before migration (read-only against AAP 2.4)
+aap-migrate --config config/config.yaml premigration-report --no-ai
+aap-migrate --config config/config.yaml premigration-report --ai
+
+# After migration (reads migration_state.db)
+aap-migrate --config config/config.yaml classify-failures
+aap-migrate remediate --from reports/classification.json --out remediation/
+aap-migrate --config config/config.yaml enhanced-report
+aap-migrate --config config/config.yaml dashboard --port 8080
+```
+
+These are also in the interactive menu (`aap-bridge`), under **p. Pre-Migration Analysis** and **6. After Migration**. To run on OpenShift, see [`deploy/openshift/README.md`](deploy/openshift/README.md).
+
 ## Performance Targets (TBD)
 
 - **Migration Rate**:
