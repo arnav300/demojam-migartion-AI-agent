@@ -304,3 +304,7 @@ container/diagnose_migration.sh
 # Customer migration datasets and validation evidence (NEVER track)
 container/CTOi-test/
 investigation/validate-dry-run/
+
+# DemoJam local planning files (not for Git)
+CLAUDE.md
+docs/demojam/
