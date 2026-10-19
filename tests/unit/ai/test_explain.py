@@ -110,7 +110,8 @@ def test_cache_hit_avoids_call(result, tmp_path):
 def test_model_changing_rc_code_is_dropped(result, tmp_path):
     model = FakeModel(rc_override="RC-005")
     assert explain_findings(result, client=model.client(), cache_path=tmp_path / "c.json") == {}
-    assert json.loads((tmp_path / "c.json").read_text()) == {}
+    assert not (tmp_path / "c.json").exists()  # nothing invalid is cached
+    assert len(model.requests) == 6  # one corrective retry per group
 
 
 def test_failed_calls_are_skipped(result):

@@ -737,7 +737,7 @@ AI_TOKEN=<token>                                      # optional bearer token
 AI_TIMEOUT_SECONDS=30
 ```
 
-Each AI-capable command also accepts `--ai/--no-ai`. The default is on when `AI_ENDPOINT` is set; `--no-ai` forces the rule-only output.
+Set `AI_CACHE_FILE=/path/ai_cache.json` to cache every validated AI answer in one file. A rehearsal run fills it, and later runs replay those answers instantly without calling the model, which keeps a live demo safe even if the model is slow. Each AI-capable command also accepts `--ai/--no-ai`. The default is on when `AI_ENDPOINT` is set; `--no-ai` forces the rule-only output.
 
 ### Try it
 

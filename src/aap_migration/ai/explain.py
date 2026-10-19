@@ -1,20 +1,17 @@
 """C7: plain-English explanations for pre-migration findings.
 
 Findings are grouped by ``(rc_code, resource_type)`` and each group costs at
-most one model call.  Results are cached in ``ai_cache.json`` keyed by a hash
-of the prompt, so re-running the report does not call the model again.
+most one model call (plus one retry).  Answers are cached in ``ai_cache.json``
+next to the report (or ``AI_CACHE_FILE``), keyed by a hash of the prompt, so
+re-running the report does not call the model again.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import defaultdict
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from aap_migration.ai.client import AIClient, is_enabled
+from aap_migration.ai.client import AIClient, is_enabled, same_rc_code
 from aap_migration.ai.prompts import MAX_SAMPLES, build_explanation_prompt
 from aap_migration.ai.schemas import FindingExplanation
 from aap_migration.analysis.premigration import Finding, PreMigrationResult
@@ -38,43 +35,6 @@ def _sample_names(findings: list[Finding]) -> list[str]:
     return sorted({str(f.resource_name) for f in findings})[:MAX_SAMPLES]
 
 
-def prompt_hash(system: str, user: str) -> str:
-    return hashlib.sha256(f"{system}\n\x00\n{user}".encode()).hexdigest()
-
-
-class PromptCache:
-    """JSON file mapping prompt hash -> validated model output."""
-
-    def __init__(self, path: Path | None) -> None:
-        self.path = path
-        self._data: dict[str, dict] = {}
-        if path and path.is_file():
-            try:
-                loaded = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    self._data = loaded
-            except (OSError, json.JSONDecodeError):
-                logger.warning("ai_cache_unreadable", path=str(path))
-
-    def get(self, key: str) -> FindingExplanation | None:
-        entry = self._data.get(key)
-        if entry is None:
-            return None
-        try:
-            return FindingExplanation.model_validate(entry)
-        except ValidationError:
-            return None
-
-    def put(self, key: str, value: FindingExplanation) -> None:
-        self._data[key] = value.model_dump()
-
-    def save(self) -> None:
-        if not self.path:
-            return
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self._data, indent=1, sort_keys=True), encoding="utf-8")
-
-
 def explain_groups(
     result: PreMigrationResult,
     client: AIClient | None = None,
@@ -85,27 +45,19 @@ def explain_groups(
         if not is_enabled():
             return {}
         client = AIClient()
+    client = client.with_cache(cache_path)
 
-    cache = PromptCache(cache_path)
     explanations: dict[tuple[str, str], FindingExplanation] = {}
     for (rc_code, resource_type), findings in group_findings(result.findings).items():
         system, user = build_explanation_prompt(
             rc_code, resource_type, _sample_names(findings), len(findings)
         )
-        key = prompt_hash(system, user)
-        explanation = cache.get(key)
-        if explanation is None:
-            explanation = client.complete_json(system, user, FindingExplanation)
-            if explanation is None:
-                continue
-            if explanation.rc_code != rc_code:
-                # Rules decide the RC code; an answer that changes it is dropped.
-                logger.warning("ai_rc_code_changed", expected=rc_code, got=explanation.rc_code)
-                continue
-            cache.put(key, explanation)
-        explanations[(rc_code, resource_type)] = explanation
-
-    cache.save()
+        # Rules decide the RC code; an answer that changes it is retried once, then dropped.
+        explanation = client.complete_json(
+            system, user, FindingExplanation, check=same_rc_code(rc_code)
+        )
+        if explanation is not None:
+            explanations[(rc_code, resource_type)] = explanation
     return explanations
 
 

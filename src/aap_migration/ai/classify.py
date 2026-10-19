@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from aap_migration.ai.client import AIClient, is_enabled
+from aap_migration.ai.client import AIClient, is_enabled, same_rc_code
 from aap_migration.ai.prompts import MAX_SAMPLES, build_classification_prompt
 from aap_migration.ai.rc_map import UNCLASSIFIED, rc_for_error
 from aap_migration.ai.schemas import RC_CODES, FailureClassification
@@ -178,11 +178,11 @@ def _explain_group(client: AIClient, group: FailureGroup) -> None:
     system, user = build_classification_prompt(
         group.rc_code, group.error_key, main_type, group.sample_names, group.count
     )
-    answer = client.complete_json(system, user, FailureClassification)
+    # Rules decide the RC code; an answer that changes it is retried once, then dropped.
+    answer = client.complete_json(
+        system, user, FailureClassification, check=same_rc_code(group.rc_code)
+    )
     if answer is None:
-        return
-    if answer.rc_code != group.rc_code:
-        logger.warning("ai_rc_code_changed", expected=group.rc_code, got=answer.rc_code)
         return
     group.ai_explanation = answer.explanation
     group.ai_confidence = answer.confidence

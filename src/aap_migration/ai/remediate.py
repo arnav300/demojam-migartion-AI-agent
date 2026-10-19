@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from aap_migration.ai.client import AIClient, is_enabled
+from aap_migration.ai.client import AIClient, is_enabled, same_rc_code
 from aap_migration.ai.prompts import MAX_SAMPLES, build_remediation_prompt
 from aap_migration.ai.schemas import RC_CODES, RemediationPlaybook
 from aap_migration.analysis.premigration import RC_CATALOG
@@ -163,11 +163,7 @@ def _draft(client: AIClient, rc: RCInput) -> RemediationPlaybook | None:
         f"\nThe play must set `check_mode: \"{{{{ {CHECK_MODE_VAR} | default(true) }}}}\"` and "
         f"take resource names from the list variable `{TARGETS_VAR}`."
     )
-    answer = client.complete_json(system, user, RemediationPlaybook)
-    if answer is not None and answer.rc_code != rc.rc_code:
-        logger.warning("ai_rc_code_changed", expected=rc.rc_code, got=answer.rc_code)
-        return None
-    return answer
+    return client.complete_json(system, user, RemediationPlaybook, check=same_rc_code(rc.rc_code))
 
 
 def build_remediation(

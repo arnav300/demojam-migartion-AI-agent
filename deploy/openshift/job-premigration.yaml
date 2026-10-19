@@ -36,6 +36,9 @@ spec:
               value: /tmp
             - name: MIGRATION_STATE_DB_PATH
               value: sqlite:////app/state/migration_state.db
+            # Shared AI answer cache: a rehearsal run fills it, the live demo replays it.
+            - name: AI_CACHE_FILE
+              value: /app/state/ai_cache.json
             - name: PATHS__EXPORT_DIR
               value: /app/state/exports
             - name: PATHS__TRANSFORM_DIR

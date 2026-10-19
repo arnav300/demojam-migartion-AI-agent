@@ -5,9 +5,8 @@ import json
 import httpx
 import pytest
 import structlog
-from pydantic import BaseModel
-
 from aap_migration.ai.client import AIClient, AIConfig, is_enabled
+from pydantic import BaseModel
 
 pytestmark = pytest.mark.unit
 
@@ -161,3 +160,72 @@ def test_token_and_prompt_never_logged_above_debug(handler):
         assert "secret prompt" not in text
         assert "secret user" not in text
         assert "not json" not in text
+
+
+class _Rc(BaseModel):
+    rc_code: str
+
+
+def test_cache_replays_without_calling_model(tmp_path):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return _chat('{"answer": "ok", "score": 1}')
+
+    cache = tmp_path / "ai_cache.json"
+    first = AIClient(AIConfig(endpoint="http://ai.test", model="granite"), httpx.MockTransport(handler), cache_path=cache)
+    assert first.complete_json("s", "u", _Answer) == _Answer(answer="ok", score=1)
+    assert cache.is_file()
+
+    replay = AIClient(AIConfig(endpoint="http://ai.test", model="granite"), httpx.MockTransport(handler), cache_path=cache)
+    assert replay.complete_json("s", "u", _Answer) == _Answer(answer="ok", score=1)
+    assert replay.complete_json("s", "other prompt", _Answer) is not None
+    assert len(calls) == 2  # only the new prompt reached the model
+
+
+def test_cache_key_includes_model(tmp_path):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return _chat('{"answer": "ok", "score": 1}')
+
+    cache = tmp_path / "c.json"
+    for model in ("granite-8b", "granite-2b"):
+        AIClient(AIConfig(endpoint="http://ai.test", model=model), httpx.MockTransport(handler), cache_path=cache).complete_json("s", "u", _Answer)
+    assert len(calls) == 2
+
+
+def test_ai_cache_file_env_wins(tmp_path, monkeypatch):
+    shared = tmp_path / "shared.json"
+    monkeypatch.setenv("AI_CACHE_FILE", str(shared))
+    client = AIClient(AIConfig(endpoint="http://ai.test"), httpx.MockTransport(lambda r: _chat('{"answer": "a", "score": 1}')))
+    client = client.with_cache(tmp_path / "per-report.json")
+    client.complete_json("s", "u", _Answer)
+    assert shared.is_file() and not (tmp_path / "per-report.json").exists()
+
+
+def test_check_failure_retries_with_reason_and_is_not_cached(tmp_path):
+    from aap_migration.ai.client import same_rc_code
+
+    replies = iter(['{"rc_code": "RC-005"}', '{"rc_code": "RC-002"}'])
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return _chat(next(replies))
+
+    cache = tmp_path / "c.json"
+    client = AIClient(AIConfig(endpoint="http://ai.test"), httpx.MockTransport(handler), cache_path=cache)
+    assert client.complete_json("s", "u", _Rc, check=same_rc_code("RC-002")) == _Rc(rc_code="RC-002")
+    assert "rc_code must be 'RC-002'" in bodies[1]["messages"][-1]["content"]
+    assert list(json.loads(cache.read_text()).values()) == [{"rc_code": "RC-002"}]
+
+
+def test_check_failing_twice_returns_none(tmp_path):
+    from aap_migration.ai.client import same_rc_code
+
+    client = AIClient(AIConfig(endpoint="http://ai.test"), httpx.MockTransport(lambda r: _chat('{"rc_code": "RC-005"}')), cache_path=tmp_path / "c.json")
+    assert client.complete_json("s", "u", _Rc, check=same_rc_code("RC-002")) is None
+    assert not (tmp_path / "c.json").exists()

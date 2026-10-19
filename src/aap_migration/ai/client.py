@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 
 import httpx
 from pydantic import BaseModel, SecretStr, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from aap_migration.ai.cache import PromptCache, prompt_hash
 from aap_migration.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -35,6 +38,8 @@ class AIConfig(BaseSettings):
     timeout_seconds: float = 30.0
     max_tokens: int = 1024
     temperature: float = 0.1
+    # One file for every AI answer; a rehearsal fills it, the live demo replays it.
+    cache_file: str = ""
 
     @property
     def chat_url(self) -> str:
@@ -69,9 +74,18 @@ class AIClient:
         self,
         config: AIConfig | None = None,
         transport: httpx.BaseTransport | None = None,
+        cache_path: Path | None = None,
     ) -> None:
         self.config = config or AIConfig()
         self._transport = transport
+        path = self.config.cache_file.strip() or cache_path
+        self.cache = PromptCache(Path(path)) if path else None
+
+    def with_cache(self, cache_path: Path | None) -> AIClient:
+        """Same client with a cache file (``AI_CACHE_FILE`` wins when set)."""
+        if cache_path is None or self.cache is not None:
+            return self
+        return AIClient(self.config, self._transport, cache_path=cache_path)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -110,10 +124,27 @@ class AIClient:
             # A malformed envelope is treated like invalid model output.
             return ""
 
-    def complete_json(self, system: str, user: str, schema: type[T]) -> T | None:
-        """Ask the model for JSON matching ``schema``; retry once on invalid output."""
+    def complete_json(
+        self,
+        system: str,
+        user: str,
+        schema: type[T],
+        check: Callable[[T], None] | None = None,
+    ) -> T | None:
+        """Ask the model for JSON matching ``schema``; retry once on invalid output.
+
+        ``check`` may raise ValueError for an answer that is valid JSON but breaks a
+        rule (e.g. a changed RC code); it is treated like a validation error.
+        Cached answers are returned without calling the model.
+        """
         if not self.config.endpoint.strip():
             return None
+        key = prompt_hash(system, user, schema.__name__, self.config.model)
+        if self.cache is not None:
+            cached = self.cache.get(key, schema)
+            if cached is not None and _passes(check, cached):
+                logger.debug("ai_cache_hit", schema=schema.__name__)
+                return cached
 
         messages = [
             {"role": "system", "content": f"{system}\n\n{_schema_instruction(schema)}"},
@@ -126,8 +157,13 @@ class AIClient:
             if content is None:
                 return None
             try:
-                return schema.model_validate_json(_extract_json(content))
-            except ValidationError as e:
+                answer = schema.model_validate_json(_extract_json(content))
+                if check is not None:
+                    check(answer)
+                if self.cache is not None:
+                    self.cache.put(key, answer)
+                return answer
+            except (ValidationError, ValueError) as e:
                 error = str(e)
             logger.debug("ai_invalid_output", attempt=attempt, content=content, error=error)
             messages = messages + [
@@ -143,3 +179,24 @@ class AIClient:
 
         logger.warning("ai_output_invalid_dropped", schema=schema.__name__, attempts=2)
         return None
+
+
+def _passes(check: Callable | None, answer: BaseModel) -> bool:
+    if check is None:
+        return True
+    try:
+        check(answer)
+        return True
+    except ValueError:
+        return False
+
+
+def same_rc_code(expected: str) -> Callable[[BaseModel], None]:
+    """Check for answers that must keep the rule-decided RC code."""
+
+    def check(answer: BaseModel) -> None:
+        got = getattr(answer, "rc_code", None)
+        if got != expected:
+            raise ValueError(f"rc_code must be {expected!r} exactly (got {got!r}); do not change it")
+
+    return check
