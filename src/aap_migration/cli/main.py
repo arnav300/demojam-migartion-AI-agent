@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 from aap_migration import __version__
 from aap_migration.cli.commands import analyze_dependencies as analyze_dependencies_commands
+from aap_migration.cli.commands import cac_export as cac_export_commands
 from aap_migration.cli.commands import classify_failures as classify_failures_commands
 from aap_migration.cli.commands import cleanup as cleanup_commands
 from aap_migration.cli.commands import config as config_commands
@@ -152,6 +153,7 @@ cli.add_command(premigration_report_commands.generate_premigration_report)
 cli.add_command(classify_failures_commands.classify_failures_cmd)
 cli.add_command(remediate_commands.remediate)
 cli.add_command(dashboard_commands.dashboard)
+cli.add_command(cac_export_commands.cac_export)
 
 
 def main() -> int:
