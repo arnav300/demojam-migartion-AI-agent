@@ -7,10 +7,9 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
-from click.testing import CliRunner
-
 from aap_migration.ai.client import AIClient, AIConfig
 from aap_migration.ai.remediate import build_remediation, load_rc_inputs, static_problems
+from click.testing import CliRunner
 
 pytestmark = pytest.mark.unit
 
@@ -221,3 +220,45 @@ def test_cli_ai_off(tmp_path, templates, monkeypatch):
     assert result.exit_code == 0, result.output
     assert (tmp_path / "rem" / "README.md").is_file()
     assert (tmp_path / "rem" / "RC-002.yml").read_text().startswith("# template RC-002")
+
+
+def test_validation_env_puts_shim_last(monkeypatch):
+    from aap_migration.ai.remediate import VALIDATION_COLLECTIONS, validation_env
+
+    monkeypatch.setenv("ANSIBLE_COLLECTIONS_PATH", "/real/collections")
+    assert validation_env()["ANSIBLE_COLLECTIONS_PATH"] == f"/real/collections:{VALIDATION_COLLECTIONS}"
+    monkeypatch.delenv("ANSIBLE_COLLECTIONS_PATH")
+    path = validation_env()["ANSIBLE_COLLECTIONS_PATH"]
+    assert path.startswith("~/.ansible/collections") and path.endswith(str(VALIDATION_COLLECTIONS))
+
+
+def test_shim_routes_controller_modules_to_awx():
+    from aap_migration.ai.remediate import VALIDATION_COLLECTIONS
+
+    runtime = VALIDATION_COLLECTIONS / "ansible_collections" / "ansible" / "controller" / "meta" / "runtime.yml"
+    routing = yaml.safe_load(runtime.read_text())["plugin_routing"]["modules"]
+    assert routing["job_template"] == {"redirect": "awx.awx.job_template"}
+    assert all(v["redirect"] == f"awx.awx.{k}" for k, v in routing.items())
+
+
+def _awx_available() -> bool:
+    import os
+    import shutil as sh
+
+    if not sh.which("ansible-playbook"):
+        return False
+    paths = os.environ.get("ANSIBLE_COLLECTIONS_PATH", "~/.ansible/collections").split(":")
+    return any((Path(p).expanduser() / "ansible_collections" / "awx" / "awx").is_dir() for p in paths)
+
+
+@pytest.mark.skipif(not _awx_available(), reason="needs ansible-core and awx.awx (present in the image)")
+def test_real_syntax_check_with_shim(tmp_path):
+    from aap_migration.ai.remediate import tool_checks
+
+    playbook, vars_file = tmp_path / "RC-002.yml", tmp_path / "RC-002.vars.yml"
+    vars_file.write_text("remediation_check_mode: true\nremediation_targets: [a]\n")
+    playbook.write_text(VALID_PLAYBOOK)
+    assert tool_checks(playbook, vars_file, which=lambda n: n == "ansible-playbook" or None) == []
+    playbook.write_text(VALID_PLAYBOOK.replace("job_template", "no_such_module"))
+    problems = tool_checks(playbook, vars_file, which=lambda n: n == "ansible-playbook" or None)
+    assert problems and "syntax-check failed" in problems[0]

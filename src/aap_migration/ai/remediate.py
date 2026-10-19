@@ -11,6 +11,7 @@ ever run against an AAP instance.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -34,6 +35,9 @@ ALLOWED_MODULE_PREFIXES = ("ansible.platform.", "ansible.controller.", "ansible.
 CHECK_MODE_VAR = "remediation_check_mode"
 TARGETS_VAR = "remediation_targets"
 CHECK_TIMEOUT_SECONDS = 120
+# Validation-only shim routing ansible.controller.* to awx.awx.* (see its runtime.yml).
+VALIDATION_COLLECTIONS = Path(__file__).parent / "validation"
+_DEFAULT_COLLECTIONS_PATH = "~/.ansible/collections:/usr/share/ansible/collections"
 
 # Task keywords that are not module names.
 _TASK_KEYWORDS = {
@@ -116,9 +120,23 @@ def _task_problems(task: Any) -> list[str]:
     ]
 
 
+def validation_env() -> dict[str, str]:
+    """Environment for the checks: the configured collections first, the shim last."""
+    env = dict(os.environ)
+    base = env.get("ANSIBLE_COLLECTIONS_PATH") or _DEFAULT_COLLECTIONS_PATH
+    env["ANSIBLE_COLLECTIONS_PATH"] = f"{base}:{VALIDATION_COLLECTIONS}"
+    return env
+
+
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        cmd, cwd=cwd, capture_output=True, text=True, timeout=CHECK_TIMEOUT_SECONDS, check=False
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=CHECK_TIMEOUT_SECONDS,
+        check=False,
+        env=validation_env(),
     )
 
 
@@ -161,7 +179,8 @@ def _draft(client: AIClient, rc: RCInput) -> RemediationPlaybook | None:
     system, user = build_remediation_prompt(rc.rc_code, rc.error_key, rc.sample_names)
     system += (
         f"\nThe play must set `check_mode: \"{{{{ {CHECK_MODE_VAR} | default(true) }}}}\"` and "
-        f"take resource names from the list variable `{TARGETS_VAR}`."
+        f"take resource names from the list variable `{TARGETS_VAR}`. Prefer ansible.controller "
+        "modules; use ansible.platform only for Gateway users, teams and authenticators."
     )
     return client.complete_json(system, user, RemediationPlaybook, check=same_rc_code(rc.rc_code))
 

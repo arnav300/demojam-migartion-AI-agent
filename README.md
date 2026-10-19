@@ -723,7 +723,7 @@ Deterministic rules always decide the root-cause code (RC-001 … RC-011). The m
 | C7 risk explanations | `aap-migrate premigration-report [--ai/--no-ai]` | Plain-English explanation per RC section, cached in `<report-dir>/ai_cache.json` |
 | C8 failure classification | `aap-migrate classify-failures [--db FILE] [--output-dir DIR]` | Explanation and confidence per `(rc_code, error_key)` group; RC codes always come from the rules |
 | C9 executive summary | `enhanced-report` / `premigration-report` | "Summary" panel at the top of the HTML. Numbers come from our data; the model only writes the sentences |
-| C10 remediation | `aap-migrate remediate --from classification.json --out remediation/` | Granite drafts a playbook per RC code. It must pass static checks, `ansible-playbook --syntax-check` and `ansible-lint`, or the template in `remediation/templates/` is used |
+| C10 remediation | `aap-migrate remediate --from classification.json --out remediation/` | Granite drafts a playbook per RC code. It must pass static checks, `ansible-playbook --syntax-check` and `ansible-lint`, or the template in `remediation/templates/` is used. The image ships `ansible-core` and `awx.awx`, the public upstream of `ansible.controller`, so drafts can be checked. `ansible.platform` (Automation Hub only) drafts fall back to the template |
 | Predicted vs actual | `aap-migrate prediction-check --prediction premigration-report.json` / `enhanced-report --prediction …` | No AI. Did the pre-migration report foresee the real failures, and with the same RC code? |
 | C11 live dashboard | `aap-migrate dashboard --port 8080` | No AI. Source, target and migrated counts per resource type, refreshed every 5 s |
 

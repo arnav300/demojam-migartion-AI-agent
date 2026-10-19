@@ -67,6 +67,10 @@ docs = [
     "mkdocs>=1.5",
     "mkdocs-material>=9.0",
 ]
+# C10: syntax-check AI-drafted remediation playbooks (installed in the container image).
+remediation = [
+    "ansible-core==2.18.1",
+]
 
 [project.scripts]
 aap-migrate = "aap_migration.cli.main:main"
@@ -83,6 +87,9 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"aap_migration.ai" = ["validation/**/*"]
 
 [tool.black]
 line-length = 100

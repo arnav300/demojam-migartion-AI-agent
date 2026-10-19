@@ -55,7 +55,13 @@ RUN ~/.local/bin/uv venv --seed --python 3.12 && \
         "h11>=0.16.0" \
         "setuptools>=78.1.1" \
         "msgpack>=1.2.1" && \
-    ~/.local/bin/uv sync --upgrade
+    ~/.local/bin/uv sync --upgrade --extra remediation
+
+# C10: awx.awx (public upstream of ansible.controller) so 'aap-migrate remediate' can
+# syntax-check AI-drafted playbooks. ansible.controller itself is Automation Hub only.
+ENV ANSIBLE_COLLECTIONS_PATH=/app/aap-bridge/collections
+RUN /app/aap-bridge/.venv/bin/ansible-galaxy collection install "awx.awx==24.6.1" -p /app/aap-bridge/collections && \
+    chmod -R a+rX /app/aap-bridge/collections
 
 # Create an alias for aap-bridge when someone enters a shell
 RUN echo "alias aap-bridge=/app/aap-bridge/.venv/bin/aap-bridge" >> ~/.bashrc

@@ -1,0 +1,103 @@
+# Validation-only shim used by 'aap-migrate remediate' for ansible-playbook --syntax-check.
+# ansible.controller is only on Red Hat Automation Hub; its upstream awx.awx (same modules)
+# is on public Galaxy. This routes ansible.controller.<module> to awx.awx.<module> so drafts
+# can be syntax-checked. It is searched LAST, so a real ansible.controller always wins.
+# Module list from awx.awx 24.6.1.
+---
+requires_ansible: '>=2.15.0'
+plugin_routing:
+  modules:
+    ad_hoc_command:
+      redirect: awx.awx.ad_hoc_command
+    ad_hoc_command_cancel:
+      redirect: awx.awx.ad_hoc_command_cancel
+    ad_hoc_command_wait:
+      redirect: awx.awx.ad_hoc_command_wait
+    application:
+      redirect: awx.awx.application
+    bulk_host_create:
+      redirect: awx.awx.bulk_host_create
+    bulk_host_delete:
+      redirect: awx.awx.bulk_host_delete
+    bulk_job_launch:
+      redirect: awx.awx.bulk_job_launch
+    controller_meta:
+      redirect: awx.awx.controller_meta
+    credential:
+      redirect: awx.awx.credential
+    credential_input_source:
+      redirect: awx.awx.credential_input_source
+    credential_type:
+      redirect: awx.awx.credential_type
+    execution_environment:
+      redirect: awx.awx.execution_environment
+    export:
+      redirect: awx.awx.export
+    group:
+      redirect: awx.awx.group
+    host:
+      redirect: awx.awx.host
+    import:
+      redirect: awx.awx.import
+    instance:
+      redirect: awx.awx.instance
+    instance_group:
+      redirect: awx.awx.instance_group
+    inventory:
+      redirect: awx.awx.inventory
+    inventory_source:
+      redirect: awx.awx.inventory_source
+    inventory_source_update:
+      redirect: awx.awx.inventory_source_update
+    job_cancel:
+      redirect: awx.awx.job_cancel
+    job_launch:
+      redirect: awx.awx.job_launch
+    job_list:
+      redirect: awx.awx.job_list
+    job_template:
+      redirect: awx.awx.job_template
+    job_wait:
+      redirect: awx.awx.job_wait
+    label:
+      redirect: awx.awx.label
+    license:
+      redirect: awx.awx.license
+    notification_template:
+      redirect: awx.awx.notification_template
+    organization:
+      redirect: awx.awx.organization
+    project:
+      redirect: awx.awx.project
+    project_update:
+      redirect: awx.awx.project_update
+    role:
+      redirect: awx.awx.role
+    role_definition:
+      redirect: awx.awx.role_definition
+    role_team_assignment:
+      redirect: awx.awx.role_team_assignment
+    role_user_assignment:
+      redirect: awx.awx.role_user_assignment
+    schedule:
+      redirect: awx.awx.schedule
+    settings:
+      redirect: awx.awx.settings
+    subscriptions:
+      redirect: awx.awx.subscriptions
+    team:
+      redirect: awx.awx.team
+    token:
+      redirect: awx.awx.token
+    user:
+      redirect: awx.awx.user
+    workflow_approval:
+      redirect: awx.awx.workflow_approval
+    workflow_job_template:
+      redirect: awx.awx.workflow_job_template
+    workflow_job_template_node:
+      redirect: awx.awx.workflow_job_template_node
+    workflow_launch:
+      redirect: awx.awx.workflow_launch
+    workflow_node_wait:
+      redirect: awx.awx.workflow_node_wait
