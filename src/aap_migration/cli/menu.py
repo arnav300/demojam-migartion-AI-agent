@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from rich.console import Console
@@ -137,6 +138,7 @@ def post_migration_submenu(ctx: Any) -> None:
     except Exception:
         pass
     classification = f"{report_dir}/classification.json"
+    prediction = f"{report_dir}/premigration-report.json"
     ai_state = "[green]on[/green]" if ai_is_enabled() else "[dim]off (AI_ENDPOINT not set)[/dim]"
 
     while True:
@@ -149,21 +151,28 @@ def post_migration_submenu(ctx: Any) -> None:
                 "2. Classify failures by root cause (JSON + CSV)\n"
                 "3. Remediation playbooks from the classification (check mode)\n"
                 "4. Live dashboard on port 8080 (Ctrl+C to stop)\n"
+                "5. Predicted vs actual (did the pre-migration report foresee the failures?)\n"
                 "b. Back",
                 title="After Migration",
                 border_style="cyan",
             )
         )
-        choice = Prompt.ask("Select an option", choices=["1", "2", "3", "4", "b"], default="b")
+        choice = Prompt.ask("Select an option", choices=["1", "2", "3", "4", "5", "b"], default="b")
         if choice == "b":
             return
         console.print()
+        has_prediction = Path(prediction).is_file()
         if choice == "1":
-            run_command(["enhanced-report"], ctx)
+            run_command(["enhanced-report", *(["--prediction", prediction] if has_prediction else [])], ctx)
         elif choice == "2":
             run_command(["classify-failures", "--output-dir", report_dir], ctx)
         elif choice == "3":
             run_command(["remediate", "--from", classification, "--out", "remediation"], ctx)
         elif choice == "4":
             run_command(["dashboard", "--port", "8080"], ctx)
+        elif choice == "5":
+            if has_prediction:
+                run_command(["prediction-check", "--prediction", prediction], ctx)
+            else:
+                console.print(f"[yellow]No {prediction}: run the pre-migration report first.[/yellow]")
         Prompt.ask("\nPress Enter to return to menu...")

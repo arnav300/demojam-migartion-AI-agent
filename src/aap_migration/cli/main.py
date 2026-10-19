@@ -25,6 +25,7 @@ from aap_migration.cli.commands import migrate as migrate_commands
 from aap_migration.cli.commands import migration_report as migration_report_commands
 from aap_migration.cli.commands import migration_report_v2 as migration_report_v2_commands
 from aap_migration.cli.commands import patch_projects as patch_projects_commands
+from aap_migration.cli.commands import prediction_check as prediction_check_commands
 from aap_migration.cli.commands import premigration_report as premigration_report_commands
 from aap_migration.cli.commands import prep as prep_commands
 from aap_migration.cli.commands import project_failures as project_failures_commands
@@ -154,6 +155,7 @@ cli.add_command(classify_failures_commands.classify_failures_cmd)
 cli.add_command(remediate_commands.remediate)
 cli.add_command(dashboard_commands.dashboard)
 cli.add_command(cac_export_commands.cac_export)
+cli.add_command(prediction_check_commands.prediction_check)
 
 
 def main() -> int:

@@ -840,6 +840,12 @@ def _build_full_org_summary(
     default=None,
     help="Add an AI-written summary panel to the HTML (default: on when AI_ENDPOINT is set).",
 )
+@click.option(
+    "--prediction",
+    "prediction_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="premigration-report.json: add a 'Predicted vs actual' panel to the HTML.",
+)
 @pass_context
 @requires_config
 @handle_errors
@@ -850,6 +856,7 @@ def generate_enhanced_report(
     output_format: str,
     organization: str | None,
     use_ai: bool | None = None,
+    prediction_file: Path | None = None,
 ) -> None:
     """Generate enhanced migration report with error analysis and metadata enrichment.
 
@@ -1126,6 +1133,8 @@ def generate_enhanced_report(
         # Step 6: Generate report in chosen format
         if output_format == "html":
             summary_html = _ai_summary_panel(org_summary, use_ai)
+            if prediction_file:
+                summary_html += _prediction_panel(prediction_file, org_summary, organization)
             echo_info("Generating enhanced HTML report...")
             report_content = _generate_enhanced_html(org_summary, migration_state, export_dir, org_mapper, source_config=ctx.config.source, summary_html=summary_html)
         elif output_format == "markdown":
@@ -1444,6 +1453,22 @@ def _ai_summary_panel(org_summary: dict, use_ai: bool | None) -> str:
         echo_info("No AI summary available; the report is shown without it.")
         return ""
     return render_summary_panel(narrative, aggregates, kind="enhanced") + "\n"
+
+
+def _prediction_panel(prediction_file: Path, org_summary: dict, organization: str | None) -> str:
+    """'Predicted vs actual' panel (rules only) from a pre-migration report JSON."""
+    from aap_migration.analysis.prediction_check import compare_predictions, render_prediction_panel
+
+    report = json.loads(Path(prediction_file).read_text(encoding="utf-8"))
+    rows = [r for summary in org_summary.values() for r in summary["resources"]]
+    comparison = compare_predictions(
+        report, rows, organizations=set(org_summary) if organization else None
+    )
+    echo_info(
+        f"Predicted vs actual: {comparison['totals']['confirmed']} of "
+        f"{comparison['totals']['actual_failures']} failures were predicted"
+    )
+    return render_prediction_panel(comparison) + "\n"
 
 
 def _generate_enhanced_html(org_summary: dict, migration_state, export_dir: Path, org_mapper: OrganizationMapper, source_config=None, summary_html: str = "") -> str:

@@ -724,6 +724,7 @@ Deterministic rules always decide the root-cause code (RC-001 … RC-011). The m
 | C8 failure classification | `aap-migrate classify-failures [--db FILE] [--output-dir DIR]` | Explanation and confidence per `(rc_code, error_key)` group; RC codes always come from the rules |
 | C9 executive summary | `enhanced-report` / `premigration-report` | "Summary" panel at the top of the HTML. Numbers come from our data; the model only writes the sentences |
 | C10 remediation | `aap-migrate remediate --from classification.json --out remediation/` | Granite drafts a playbook per RC code. It must pass static checks, `ansible-playbook --syntax-check` and `ansible-lint`, or the template in `remediation/templates/` is used |
+| Predicted vs actual | `aap-migrate prediction-check --prediction premigration-report.json` / `enhanced-report --prediction …` | No AI. Did the pre-migration report foresee the real failures, and with the same RC code? |
 | C11 live dashboard | `aap-migrate dashboard --port 8080` | No AI. Source, target and migrated counts per resource type, refreshed every 5 s |
 
 ### Configuration
@@ -749,7 +750,8 @@ aap-migrate --config config/config.yaml premigration-report --ai
 # After migration (reads migration_state.db)
 aap-migrate --config config/config.yaml classify-failures
 aap-migrate remediate --from reports/classification.json --out remediation/
-aap-migrate --config config/config.yaml enhanced-report
+aap-migrate --config config/config.yaml prediction-check --prediction reports/premigration-report.json
+aap-migrate --config config/config.yaml enhanced-report --prediction reports/premigration-report.json
 aap-migrate --config config/config.yaml dashboard --port 8080
 ```
 
