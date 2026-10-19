@@ -59,6 +59,7 @@ Developer setup: Python 3.12 (the codespace default is 3.14). Run `pip install -
 - `kubectl kustomize` renders the deploy base.
 - The `classify-failures`, `remediate` and `dashboard` CLIs were run by hand on the fixtures.
 - The `uv.lock` relock adds only `ansible-core` and `resolvelib`.
+- The AI-on path end to end over real HTTP against a fake OpenAI-compatible server on localhost (2026-10-19). See "Local AI end-to-end check" at the end.
 
 **Not verified yet (first real test is on the cluster):**
 - A real Granite or vLLM endpoint: JSON compliance, latency, and whether its answers pass our schemas. In particular, `ReportNarrative` rejects any digits other than AAP versions and RC codes.
@@ -66,7 +67,7 @@ Developer setup: Python 3.12 (the codespace default is 3.14). Run `pip install -
   - that `premigration-report` `resource_type` names match `migration_progress.resource_type`;
   - that the RC mapping fits real error messages.
 - The image build (`uv sync --extra remediation`, `ansible-galaxy` in the Containerfile) and running under OpenShift's random UID.
-- `premigration-report` and `enhanced-report` end to end through the CLI with AI on. Only their helpers and renderers are unit-tested.
+- `premigration-report` and `enhanced-report` through the CLI with AI on. Both need a raw export or a migration database. The pre-migration AI path was run through a script that calls the same helpers.
 - `cac-export` on a real export, and applying its output with `infra.aap_configuration` (T19 step 4).
 - Remediation playbooks against a live AAP 2.6. They must be run with `ansible.controller` from Automation Hub; `awx.awx` uses `/api/v2/`.
 - Gateway (`ansible.platform`) drafts can't be syntax-checked without Automation Hub collections.
@@ -75,7 +76,7 @@ Developer setup: Python 3.12 (the codespace default is 3.14). Run `pip install -
 
 1. The teammate finishes the cluster and Granite. Then follow the runbook below: AI-off run, AI-on rehearsal, then the stage run.
 2. Send any failing log to Claude. The likely spots are listed in the runbook under "Known risks".
-3. Optional: an end-to-end local test with a fake OpenAI-compatible server on localhost, a 5-minute demo script, and T19 steps 3–4.
+3. Optional: a 5-minute demo script, and T19 steps 3–4. The local fake-server check is done.
 
 ---
 
@@ -651,3 +652,16 @@ These failures already exist on the branch. Each task below was checked against 
 - **Open:**
   - None of the templates has run against a live AAP 2.6 yet.
   - RC-011 needs `ansible.platform` (Automation Hub) for any automated Gateway fix.
+
+### Local AI end-to-end check (2026-10-19)
+
+- **Setup:** a fake OpenAI-compatible chat server on `127.0.0.1` read the requested schema from the system prompt and returned a valid answer. The real `aap-migrate` CLI ran against it with `AI_ENDPOINT`, `AI_MODEL`, `AI_TOKEN` and `AI_CACHE_FILE` set, on the `failures.db` and `premigration_inventory.json` fixtures. The script stays local and is not committed.
+- **`classify-failures`:** AI explanations for all 12 groups. The `Authorization` header was sent on every call.
+- **`remediate`:** 11 of 11 drafts had source `generated`, so each passed the static checks and a real `ansible-playbook --syntax-check`.
+- **Cache replay:** with the server stopped, the same run gave the same output entirely from `ai_cache.json`. This is the stage-run fallback.
+- **Invalid answers** (`rc_code` RC-999): 0 of 12 groups explained and 11 of 11 playbooks from `template`. 46 calls means 23 prompts with one retry each. Nothing was cached.
+- **Pre-migration with AI:** explanations for RC-001, RC-002 and STALE, and the Summary panel rendered in the HTML.
+- **Secrets:** the token string appears in neither the HTML nor the cache file.
+- **Not covered:**
+  - real-model behaviour (Granite);
+  - the CLI wrappers of `premigration-report` and `enhanced-report`, which need an export or a migration database.
