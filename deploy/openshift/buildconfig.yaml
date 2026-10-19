@@ -1,0 +1,36 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: copilot
+  labels:
+    app.kubernetes.io/name: copilot
+spec:
+  runPolicy: Serial
+  source:
+    type: Git
+    git:
+      uri: https://github.com/arnav300/demojam-migartion-AI-agent.git
+      ref: demojam/migration-agent
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+      # The Containerfile uses the short name "ubi9/ubi"; pin the fully qualified base here.
+      from:
+        kind: DockerImage
+        name: registry.access.redhat.com/ubi9/ubi:latest
+      buildArgs:
+        - name: AAP_BRIDGE_ZIP
+          value: https://github.com/arnav300/demojam-migartion-AI-agent/archive/refs/heads/demojam/migration-agent.zip
+  output:
+    to:
+      kind: ImageStreamTag
+      name: copilot:latest
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  triggers: []

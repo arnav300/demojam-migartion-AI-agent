@@ -1,0 +1,10 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: copilot
+  labels:
+    app.kubernetes.io/name: copilot
+spec:
+  # Lets Jobs in this namespace use the short image name "copilot:latest".
+  lookupPolicy:
+    local: true

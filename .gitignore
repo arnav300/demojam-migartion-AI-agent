@@ -308,3 +308,6 @@ investigation/validate-dry-run/
 # DemoJam local planning files (not for Git)
 CLAUDE.md
 docs/demojam/
+
+# DemoJam OpenShift: real Secret manifest must never be committed
+deploy/openshift/secret.yaml
