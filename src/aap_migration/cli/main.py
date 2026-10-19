@@ -26,6 +26,7 @@ from aap_migration.cli.commands import patch_projects as patch_projects_commands
 from aap_migration.cli.commands import premigration_report as premigration_report_commands
 from aap_migration.cli.commands import prep as prep_commands
 from aap_migration.cli.commands import project_failures as project_failures_commands
+from aap_migration.cli.commands import remediate as remediate_commands
 from aap_migration.cli.commands import retry as retry_commands
 from aap_migration.cli.commands import state as state_commands
 from aap_migration.cli.commands import transform as transform_commands
@@ -148,6 +149,7 @@ cli.add_command(validate_commands.validate)
 cli.add_command(migration_report_v2_commands.generate_enhanced_report)
 cli.add_command(premigration_report_commands.generate_premigration_report)
 cli.add_command(classify_failures_commands.classify_failures_cmd)
+cli.add_command(remediate_commands.remediate)
 
 
 def main() -> int:
