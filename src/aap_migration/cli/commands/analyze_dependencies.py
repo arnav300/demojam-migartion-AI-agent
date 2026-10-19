@@ -9,7 +9,11 @@ import sys
 import click
 
 from aap_migration.analysis.dependency_analyzer import CrossOrgDependencyAnalyzer
-from aap_migration.analysis.html_report import generate_html_report
+from aap_migration.analysis.html_report import (
+    generate_html_report,
+    render_dependency_html,
+    view_model_from_json,
+)
 from aap_migration.analysis.reports import (
     format_detailed_report,
     format_summary_report,
@@ -48,6 +52,14 @@ def serialize_global_report_to_json(report) -> str:
 
         organizations[org_name] = {
             "org_id": org_report.org_id,
+            "resource_summary": sorted(
+                (
+                    {"type": rtype, "count": len(items)}
+                    for rtype, items in (org_report.resources or {}).items()
+                    if items
+                ),
+                key=lambda x: -x["count"],
+            ),
             "resource_count": org_report.resource_count,
             "has_dependencies": org_report.has_cross_org_deps,
             "can_migrate_standalone": org_report.can_migrate_standalone,
@@ -65,10 +77,23 @@ def serialize_global_report_to_json(report) -> str:
         "dependent_orgs": report.dependent_orgs,
         "migration_order": report.migration_order,
         "migration_phases": report.migration_phases,
+        "cycles": [list(c) for c in (getattr(report, "cycles", None) or [])],
         "organizations": organizations,
     }
 
     return json.dumps(report_dict, indent=2)
+
+
+def _load_risk_report(path: str | None) -> dict | None:
+    """Load a premigration-report JSON, validating its type."""
+    if not path:
+        return None
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if data.get("report_type") != "premigration":
+        raise click.ClickException(f"{path} is not a premigration-report JSON file")
+    click.echo(f"ℹ Using pre-migration data from {path} (generated {data.get('generated')})")
+    return data
 
 
 @click.command(name="analyze-dependencies")
@@ -114,6 +139,11 @@ def serialize_global_report_to_json(report) -> str:
     type=click.Path(),
     help="Generate JSON report at specified path.",
 )
+@click.option(
+    "--risk-report",
+    type=click.Path(exists=True, dir_okay=False),
+    help="premigration-report JSON: annotate the HTML with predicted failures and stale data.",
+)
 @pass_context
 def analyze_dependencies_cmd(
     ctx: MigrationContext,
@@ -124,6 +154,7 @@ def analyze_dependencies_cmd(
     output_file: str | None,
     output_html: str | None,
     output_json: str | None,
+    risk_report: str | None,
 ):
     """Analyze cross-organization dependencies for migration planning.
 
@@ -152,8 +183,11 @@ def analyze_dependencies_cmd(
 
         # Generate both HTML and JSON
         aap-bridge analyze-dependencies --all --output-html report.html --output-json deps.json
+
+        # Enrich the HTML with the pre-migration readiness report
+        aap-bridge analyze-dependencies --all --output-html deps.html --risk-report reports/premigration-report.json
     """
-    asyncio.run(run_analysis(ctx, organization, analyze_all, verbose, output_format, output_file, output_html, output_json))
+    asyncio.run(run_analysis(ctx, organization, analyze_all, verbose, output_format, output_file, output_html, output_json, risk_report))
 
 
 async def run_analysis(
@@ -165,9 +199,11 @@ async def run_analysis(
     output_file: str | None,
     output_html: str | None,
     output_json: str | None,
+    risk_report: str | None = None,
 ):
     """Run dependency analysis."""
     try:
+        risk_data = _load_risk_report(risk_report)
         # Validate input
         if not analyze_all and not organizations:
             click.echo("Error: Must specify --all or -o ORGANIZATION")
@@ -202,7 +238,7 @@ async def run_analysis(
 
             # Generate HTML if requested
             if output_html:
-                html_content = generate_html_report(global_report)
+                html_content = generate_html_report(global_report, risk_data)
                 with open(output_html, "w", encoding="utf-8") as f:
                     f.write(html_content)
                 click.echo(f"✓ HTML report generated: {output_html}")
@@ -257,7 +293,7 @@ async def run_analysis(
 
                 # Generate HTML if requested
                 if output_html:
-                    html_content = generate_html_report(global_report)
+                    html_content = generate_html_report(global_report, risk_data)
                     with open(output_html, "w", encoding="utf-8") as f:
                         f.write(html_content)
                     click.echo(f"✓ HTML report generated: {output_html}")
@@ -319,7 +355,7 @@ async def run_analysis(
 
             # Generate HTML if requested
             if output_html:
-                html_content = generate_html_report(global_report)
+                html_content = generate_html_report(global_report, risk_data)
                 with open(output_html, "w", encoding="utf-8") as f:
                     f.write(html_content)
                 click.echo(f"✓ HTML report generated: {output_html}")
@@ -354,3 +390,38 @@ async def run_analysis(
         )
         click.echo(f"✗ Analysis failed: {e}")
         sys.exit(1)
+
+
+@click.command(name="render-dependency-report")
+@click.option(
+    "--input-json", "input_json", required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="JSON written by 'analyze-dependencies --output-json'.",
+)
+@click.option(
+    "--risk-report",
+    type=click.Path(exists=True, dir_okay=False),
+    help="premigration-report JSON used to annotate predicted failures.",
+)
+@click.option("--output-html", required=True, type=click.Path(dir_okay=False), help="HTML file to write.")
+def render_dependency_report_cmd(input_json: str, risk_report: str | None, output_html: str) -> None:
+    """Re-render the Dependency Analyzer UI offline, without querying AAP.
+
+    Combines an existing dependency JSON with a pre-migration report, so the
+    (slow) dependency analysis and the export can run in parallel and be
+    merged afterwards.
+
+    \b
+    Example:
+        aap-bridge render-dependency-report \\
+            --input-json reports/dependencies.json \\
+            --risk-report reports/premigration-report.json \\
+            --output-html reports/dependencies.html
+    """
+    with open(input_json, encoding="utf-8") as f:
+        deps = json.load(f)
+    view = view_model_from_json(deps)
+    html_content = render_dependency_html(view, _load_risk_report(risk_report))
+    with open(output_html, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    click.echo(f"✓ HTML report generated: {output_html}")

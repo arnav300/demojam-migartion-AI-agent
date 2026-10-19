@@ -234,6 +234,104 @@ _HUMAN_READABLE_ERRORS: dict[str, str] = {
 }
 
 
+def extract_export_metadata(resource_type: str, item: dict) -> dict:
+    """Extract report metadata from a single RAW exported (AAP 2.4) resource.
+
+    Shared by ``enhanced-report`` and ``premigration-report`` so both reports
+    classify staleness from exactly the same fields.
+    """
+    modified = item.get("modified", "")
+    summary_fields = item.get("summary_fields", {})
+
+    created_by_info = summary_fields.get("created_by")
+    created_by = _format_user_info(created_by_info)
+
+    modified_by_info = summary_fields.get("modified_by")
+    modified_by = _format_user_info(modified_by_info)
+
+    meta = {
+        "modified": modified,
+        "created_by": created_by,
+        "modified_by": modified_by,
+    }
+
+    for field in _EXPORT_META_FIELDS:
+        val = item.get(field)
+        if val is not None:
+            meta[field] = val
+
+    if item.get("status") is not None:
+        meta["sync_status"] = item["status"]
+
+    playbook = item.get("playbook")
+    if playbook:
+        meta["playbook"] = playbook
+
+    proj_info = summary_fields.get("project")
+    if isinstance(proj_info, dict) and proj_info.get("name"):
+        meta["project_name"] = proj_info["name"]
+
+    inv_info = summary_fields.get("inventory")
+    if isinstance(inv_info, dict) and inv_info.get("name"):
+        meta["inventory_name"] = inv_info["name"]
+
+    creds_info = summary_fields.get("credentials")
+    if isinstance(creds_info, list) and creds_info:
+        meta["credential_names"] = ", ".join(
+            c["name"] for c in creds_info if isinstance(c, dict) and c.get("name")
+        )
+
+    org_info = summary_fields.get("organization")
+    if isinstance(org_info, dict) and org_info.get("name"):
+        meta["organization_name"] = org_info["name"]
+
+    for scm_field in ("scm_type", "scm_url", "scm_branch"):
+        scm_val = item.get(scm_field)
+        if scm_val:
+            meta[scm_field] = scm_val
+
+    if resource_type == "workflow_job_templates":
+        nodes = item.get("nodes", [])
+        null_nodes = [
+            n for n in nodes
+            if isinstance(n, dict) and n.get("unified_job_template") is None
+        ]
+        meta["wf_total_nodes"] = len(nodes)
+        meta["wf_null_node_count"] = len(null_nodes)
+        meta["wf_null_node_ids"] = [n.get("id") for n in null_nodes]
+
+    if resource_type == "job_templates":
+        ask_inv = item.get("ask_inventory_on_launch")
+        if ask_inv is not None:
+            meta["ask_inventory_on_launch"] = ask_inv
+
+    if resource_type == "inventory_sources":
+        for is_field in ("source", "source_project"):
+            is_val = item.get(is_field)
+            if is_val is not None:
+                meta[is_field] = is_val
+
+    if resource_type == "schedules":
+        sched_enabled = item.get("enabled")
+        if sched_enabled is not None:
+            meta["schedule_enabled"] = sched_enabled
+        next_run = item.get("next_run")
+        if next_run is not None:
+            meta["next_run"] = next_run
+
+    if resource_type == "inventories":
+        for inv_field in (
+            "total_hosts", "has_active_failures",
+            "pending_deletion", "total_inventory_sources",
+            "inventory_sources_with_failures",
+        ):
+            inv_val = item.get(inv_field)
+            if inv_val is not None:
+                meta[inv_field] = inv_val
+
+    return meta
+
+
 def _build_export_lookup(export_dir: Path) -> dict:
     """Build lookup table from export files: (resource_type, source_id) -> metadata.
 
@@ -271,97 +369,7 @@ def _build_export_lookup(export_dir: Path) -> dict:
                 sid = item.get("_source_id") or item.get("id")
                 if sid is None:
                     continue
-
-                modified = item.get("modified", "")
-                summary_fields = item.get("summary_fields", {})
-
-                created_by_info = summary_fields.get("created_by")
-                created_by = _format_user_info(created_by_info)
-
-                modified_by_info = summary_fields.get("modified_by")
-                modified_by = _format_user_info(modified_by_info)
-
-                meta = {
-                    "modified": modified,
-                    "created_by": created_by,
-                    "modified_by": modified_by,
-                }
-
-                for field in _EXPORT_META_FIELDS:
-                    val = item.get(field)
-                    if val is not None:
-                        meta[field] = val
-
-                if item.get("status") is not None:
-                    meta["sync_status"] = item["status"]
-
-                playbook = item.get("playbook")
-                if playbook:
-                    meta["playbook"] = playbook
-
-                proj_info = summary_fields.get("project")
-                if isinstance(proj_info, dict) and proj_info.get("name"):
-                    meta["project_name"] = proj_info["name"]
-
-                inv_info = summary_fields.get("inventory")
-                if isinstance(inv_info, dict) and inv_info.get("name"):
-                    meta["inventory_name"] = inv_info["name"]
-
-                creds_info = summary_fields.get("credentials")
-                if isinstance(creds_info, list) and creds_info:
-                    meta["credential_names"] = ", ".join(
-                        c["name"] for c in creds_info if isinstance(c, dict) and c.get("name")
-                    )
-
-                org_info = summary_fields.get("organization")
-                if isinstance(org_info, dict) and org_info.get("name"):
-                    meta["organization_name"] = org_info["name"]
-
-                for scm_field in ("scm_type", "scm_url", "scm_branch"):
-                    scm_val = item.get(scm_field)
-                    if scm_val:
-                        meta[scm_field] = scm_val
-
-                if resource_type == "workflow_job_templates":
-                    nodes = item.get("nodes", [])
-                    null_nodes = [
-                        n for n in nodes
-                        if isinstance(n, dict) and n.get("unified_job_template") is None
-                    ]
-                    meta["wf_total_nodes"] = len(nodes)
-                    meta["wf_null_node_count"] = len(null_nodes)
-                    meta["wf_null_node_ids"] = [n.get("id") for n in null_nodes]
-
-                if resource_type == "job_templates":
-                    ask_inv = item.get("ask_inventory_on_launch")
-                    if ask_inv is not None:
-                        meta["ask_inventory_on_launch"] = ask_inv
-
-                if resource_type == "inventory_sources":
-                    for is_field in ("source", "source_project"):
-                        is_val = item.get(is_field)
-                        if is_val is not None:
-                            meta[is_field] = is_val
-
-                if resource_type == "schedules":
-                    sched_enabled = item.get("enabled")
-                    if sched_enabled is not None:
-                        meta["schedule_enabled"] = sched_enabled
-                    next_run = item.get("next_run")
-                    if next_run is not None:
-                        meta["next_run"] = next_run
-
-                if resource_type == "inventories":
-                    for inv_field in (
-                        "total_hosts", "has_active_failures",
-                        "pending_deletion", "total_inventory_sources",
-                        "inventory_sources_with_failures",
-                    ):
-                        inv_val = item.get(inv_field)
-                        if inv_val is not None:
-                            meta[inv_field] = inv_val
-
-                lookup[(resource_type, sid)] = meta
+                lookup[(resource_type, sid)] = extract_export_metadata(resource_type, item)
 
     return lookup
 

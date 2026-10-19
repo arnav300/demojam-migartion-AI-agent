@@ -23,6 +23,7 @@ from aap_migration.cli.commands import migration_report as migration_report_comm
 from aap_migration.cli.commands import patch_projects as patch_projects_commands
 from aap_migration.cli.commands import prep as prep_commands
 from aap_migration.cli.commands import migration_report_v2 as migration_report_v2_commands
+from aap_migration.cli.commands import premigration_report as premigration_report_commands
 from aap_migration.cli.commands import project_failures as project_failures_commands
 from aap_migration.cli.commands import retry as retry_commands
 from aap_migration.cli.commands import state as state_commands
@@ -132,6 +133,7 @@ cli.add_command(state_commands.state)
 
 # Register standalone commands
 cli.add_command(analyze_dependencies_commands.analyze_dependencies_cmd)
+cli.add_command(analyze_dependencies_commands.render_dependency_report_cmd)
 cli.add_command(cleanup_commands.cleanup)
 cli.add_command(prep_commands.prep)
 cli.add_command(export_import.export)
@@ -143,6 +145,7 @@ cli.add_command(migration_report_commands.generate_migration_report)
 cli.add_command(iam_commands.iam)
 cli.add_command(validate_commands.validate)
 cli.add_command(migration_report_v2_commands.generate_enhanced_report)
+cli.add_command(premigration_report_commands.generate_premigration_report)
 
 
 def main() -> int:

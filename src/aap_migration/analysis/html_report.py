@@ -1,22 +1,31 @@
-"""Self-contained HTML report generator for dependency analysis.
+"""Self-contained HTML UI for the cross-organization Dependency Analyzer.
 
-Dependencies are presented strictly as nested lists — no SVG mind map,
-no node graph. All CSS and JavaScript are embedded inline for
-air-gapped environments. No external dependencies, CDNs, or internet
-connection required.
+The page answers two questions for whoever plans the migration:
+
+1. *In which order can organizations move?*  Organizations are laid out in
+   migration waves (phases computed from the dependency graph); each wave can
+   be migrated in parallel once the previous ones are done.
+2. *What will break on the way?*  When a pre-migration report
+   (``aap-bridge premigration-report``) is supplied, every organization,
+   dependency and dependent resource is annotated with its predicted outcome
+   (Will fail / At risk / Needs action / Stale / Ready), so a dependency that
+   is itself going to fail is visible as a blocker for every organization
+   that needs it.
+
+All CSS and JavaScript are inline (air-gapped friendly).
 """
 
 from __future__ import annotations
 
-import html
-import json
-from typing import TYPE_CHECKING
+from html import escape
+from typing import TYPE_CHECKING, Any
+
+from aap_migration.reporting.ui_kit import page
 
 if TYPE_CHECKING:
     from aap_migration.analysis.dependency_analyzer import GlobalDependencyReport
 
 
-# Friendly display names for AAP resource types
 _RESOURCE_TYPE_DISPLAY = {
     "job_templates": "Job Templates",
     "workflow_job_templates": "Workflow Templates",
@@ -38,1010 +47,520 @@ def _display_type(rtype: str) -> str:
     return _RESOURCE_TYPE_DISPLAY.get(rtype, rtype.replace("_", " ").title())
 
 
-def generate_html_report(report: GlobalDependencyReport) -> str:
-    """Generate self-contained HTML report with list-based dependency display.
-
-    Args:
-        report: Global dependency analysis report
-
-    Returns:
-        Complete HTML string with embedded CSS/JS
-    """
-    # Build per-org data the JS side needs to render the lists.
-    orgs_data = []
+# ---------------------------------------------------------------------------
+# View model
+# ---------------------------------------------------------------------------
+def build_view_model(report: GlobalDependencyReport) -> dict[str, Any]:
+    """Convert a GlobalDependencyReport into the plain dict rendered by the UI."""
+    orgs = []
     for org_name, org_report in report.org_reports.items():
-        # Resource type summary: just type -> count, no individual items
-        # (individual resources are not part of the list-based dependency view).
-        resource_summary = []
-        for rtype, items in org_report.resources.items():
-            if not items:
-                continue
-            resource_summary.append({
-                "type": rtype,
-                "display": _display_type(rtype),
-                "count": len(items),
-            })
-        resource_summary.sort(key=lambda x: x["display"])
-
-        # Dependencies grouped by source org, each dependency a resource with
-        # the list of local resources that require it.
-        dependencies = []
-        for dep_org, deps in sorted(org_report.dependencies.items()):
-            resources = []
-            for dep in deps:
-                resources.append({
-                    "type": dep.resource_type,
-                    "type_display": _display_type(dep.resource_type),
-                    "name": dep.resource_name,
-                    "id": dep.resource_id,
-                    "used_by": [
-                        {
-                            "type": _display_type(u["type"]),
-                            "name": u["name"],
-                            "id": u["id"],
-                        }
-                        for u in dep.required_by
-                    ],
-                })
-            # Sort: by type then name for stable list order
-            resources.sort(key=lambda r: (r["type_display"], r["name"].lower()))
-            dependencies.append({
+        summary = [
+            {"type": rtype, "count": len(items)}
+            for rtype, items in (org_report.resources or {}).items()
+            if items
+        ]
+        deps = []
+        for dep_org, dep_list in sorted(org_report.dependencies.items()):
+            deps.append({
                 "org": dep_org,
-                "resource_count": len(resources),
-                "resources": resources,
+                "resources": sorted(
+                    (
+                        {
+                            "type": d.resource_type,
+                            "id": d.resource_id,
+                            "name": d.resource_name,
+                            "used_by": [
+                                {"type": u.get("type"), "id": u.get("id"), "name": u.get("name")}
+                                for u in d.required_by
+                            ],
+                        }
+                        for d in dep_list
+                    ),
+                    key=lambda r: (r["type"], str(r["name"]).lower()),
+                ),
             })
-
-        orgs_data.append({
+        orgs.append({
             "name": org_name,
             "id": org_report.org_id,
             "total_resources": org_report.resource_count,
             "has_dependencies": org_report.has_cross_org_deps,
-            "required_before": org_report.required_migrations_before,
-            "resource_summary": resource_summary,
-            "dependencies": dependencies,
+            "required_before": list(org_report.required_migrations_before),
+            "resource_summary": sorted(summary, key=lambda s: -s["count"]),
+            "dependencies": deps,
         })
+    return {
+        "analysis_date": report.analysis_date.isoformat(timespec="seconds"),
+        "source_url": str(report.source_url),
+        "total_organizations": report.total_organizations,
+        "independent_orgs": list(report.independent_orgs),
+        "dependent_orgs": list(report.dependent_orgs),
+        "migration_order": list(report.migration_order),
+        "phases": [
+            {
+                "phase": p.get("phase"),
+                "description": p.get("description", ""),
+                "orgs": list(p.get("orgs", [])),
+                "has_cycle": p.get("has_cycle", False),
+            }
+            for p in report.migration_phases
+        ],
+        "cycles": [list(c) for c in (getattr(report, "cycles", None) or [])],
+        "organizations": sorted(orgs, key=lambda o: o["name"].lower()),
+    }
 
-    # Phases
-    phases_data = []
-    for phase in report.migration_phases:
-        phases_data.append({
-            "phase": phase["phase"],
-            "description": phase["description"],
-            "orgs": phase["orgs"],
-            "has_cycle": phase.get("has_cycle", False),
-            "cycles": phase.get("cycles", []),
+
+def view_model_from_json(data: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild the view model from ``analyze-dependencies --output-json``.
+
+    Lets the UI be re-rendered (for example after a new pre-migration report)
+    without querying AAP 2.4 again.
+    """
+    orgs = []
+    for name, o in (data.get("organizations") or {}).items():
+        deps = []
+        for dep_org, items in sorted((o.get("dependencies") or {}).items()):
+            deps.append({
+                "org": dep_org,
+                "resources": [
+                    {
+                        "type": i.get("resource_type"),
+                        "id": i.get("resource_id"),
+                        "name": i.get("resource_name"),
+                        "used_by": [
+                            {"type": u.get("type"), "id": u.get("id"), "name": u.get("name")}
+                            for u in (i.get("used_by") or [])
+                        ],
+                    }
+                    for i in items
+                ],
+            })
+        orgs.append({
+            "name": name,
+            "id": o.get("org_id"),
+            "total_resources": o.get("resource_count", 0),
+            "has_dependencies": o.get("has_dependencies", False),
+            "required_before": o.get("required_before", []),
+            "resource_summary": o.get("resource_summary", []),
+            "dependencies": deps,
         })
-
-    # Cycles (top-level)
-    cycles_data = list(getattr(report, "cycles", []) or [])
-
-    # Serialize to JSON for safe inline embedding
-    orgs_json = json.dumps(orgs_data, indent=2)
-    phases_json = json.dumps(phases_data, indent=2)
-    cycles_json = json.dumps(cycles_data, indent=2)
-
-    # Header summary numbers
-    total_orgs = report.total_organizations
-    indep_count = len(report.independent_orgs)
-    dep_count = len(report.dependent_orgs)
-    phase_count = len(report.migration_phases)
-    cycle_count = len(cycles_data)
-    analysis_date = report.analysis_date.strftime("%Y-%m-%d %H:%M:%S")
-    source_url = html.escape(str(report.source_url))
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AAP Migration - Dependency Analysis</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f8fafc;
-            color: #1e293b;
-            line-height: 1.5;
-        }}
-
-        .container {{
-            display: grid;
-            grid-template-rows: auto auto 1fr;
-            min-height: 100vh;
-        }}
-
-        .header {{
-            background: linear-gradient(135deg, #1e3a8a 0%, #7c3aed 100%);
-            color: white;
-            padding: 24px 40px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        }}
-
-        .header h1 {{
-            font-size: 1.7em;
-            margin-bottom: 4px;
-        }}
-
-        .header .subtitle {{
-            font-size: 0.85em;
-            opacity: 0.85;
-        }}
-
-        .header-controls {{
-            display: flex;
-            gap: 24px;
-            align-items: center;
-            margin-top: 16px;
-            flex-wrap: wrap;
-        }}
-
-        .search-box {{
-            flex: 1;
-            min-width: 240px;
-            max-width: 400px;
-        }}
-
-        .search-input {{
-            width: 100%;
-            padding: 10px 14px;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.9em;
-            background: rgba(255,255,255,0.95);
-            color: #1e293b;
-        }}
-
-        .stats-bar {{
-            display: flex;
-            gap: 24px;
-            font-size: 0.85em;
-            flex-wrap: wrap;
-        }}
-
-        .stat-item {{ display: flex; align-items: center; gap: 6px; }}
-
-        .tabs {{
-            display: flex;
-            background: #f1f5f9;
-            border-bottom: 2px solid #cbd5e1;
-            padding: 0 40px;
-        }}
-
-        .tab {{
-            padding: 14px 26px;
-            cursor: pointer;
-            border: none;
-            background: none;
-            font-size: 0.95em;
-            font-weight: 600;
-            color: #64748b;
-            border-bottom: 3px solid transparent;
-            transition: color 0.15s, border-color 0.15s, background 0.15s;
-        }}
-
-        .tab:hover {{ background: rgba(59, 130, 246, 0.08); color: #3b82f6; }}
-        .tab.active {{ color: #3b82f6; border-bottom-color: #3b82f6; background: white; }}
-
-        .main-content {{ background: #f8fafc; }}
-        .tab-content {{ display: none; padding: 32px 40px; }}
-        .tab-content.active {{ display: block; }}
-
-        h2 {{ color: #1e293b; margin-bottom: 16px; font-size: 1.4em; }}
-        h3 {{ color: #1e293b; margin-bottom: 12px; font-size: 1.15em; }}
-
-        .muted {{ color: #64748b; font-size: 0.9em; }}
-
-        /* Stat cards */
-        .stat-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 16px;
-            margin-bottom: 28px;
-        }}
-
-        .stat-card {{
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            text-align: center;
-        }}
-
-        .stat-value {{ font-size: 2.4em; font-weight: 700; color: #3b82f6; line-height: 1.1; }}
-        .stat-label {{ font-size: 0.85em; color: #64748b; margin-top: 6px; }}
-        .stat-card.success .stat-value {{ color: #10b981; }}
-        .stat-card.warning .stat-value {{ color: #f59e0b; }}
-        .stat-card.danger .stat-value {{ color: #ef4444; }}
-
-        /* Generic card */
-        .card {{
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            padding: 24px;
-            margin-bottom: 20px;
-        }}
-
-        /* Org summary lists (overview tab) */
-        .summary-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 20px;
-        }}
-
-        .org-list {{ list-style: none; }}
-
-        .org-list li {{
-            padding: 8px 12px;
-            border-left: 3px solid #cbd5e1;
-            background: #f8fafc;
-            margin-bottom: 6px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background 0.15s, border-color 0.15s;
-        }}
-
-        .org-list li.independent {{ border-left-color: #10b981; }}
-        .org-list li.dependent {{ border-left-color: #f59e0b; }}
-        .org-list li:hover {{ background: #eff6ff; border-left-color: #3b82f6; }}
-
-        .org-list .org-name {{ font-weight: 600; color: #1e293b; }}
-        .org-list .org-meta {{ font-size: 0.8em; color: #64748b; margin-top: 2px; }}
-
-        /* Cycles section */
-        .cycles-card {{
-            background: #fef2f2;
-            border-left: 4px solid #ef4444;
-            border-radius: 10px;
-            padding: 20px 24px;
-            margin-bottom: 24px;
-        }}
-
-        .cycles-card h3 {{ color: #b91c1c; }}
-
-        .cycle-item {{
-            background: white;
-            padding: 12px 16px;
-            border-radius: 6px;
-            margin-top: 10px;
-            border: 1px solid #fecaca;
-        }}
-
-        .cycle-item .cycle-label {{
-            font-size: 0.8em;
-            color: #991b1b;
-            font-weight: 700;
-            text-transform: uppercase;
-            margin-bottom: 6px;
-        }}
-
-        .cycle-orgs {{ list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }}
-
-        .cycle-orgs li {{
-            background: #fee2e2;
-            color: #991b1b;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-weight: 600;
-            font-size: 0.9em;
-            cursor: pointer;
-        }}
-
-        .cycle-orgs li:hover {{ background: #fecaca; }}
-
-        /* Phase cards */
-        .phases-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 20px;
-        }}
-
-        .phase-card {{
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            overflow: hidden;
-        }}
-
-        .phase-header {{
-            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-            color: white;
-            padding: 16px 20px;
-            font-weight: 700;
-            font-size: 1.1em;
-        }}
-
-        .phase-card.has-cycle .phase-header {{
-            background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
-        }}
-
-        .phase-description {{
-            padding: 12px 20px;
-            background: #eff6ff;
-            color: #1e40af;
-            font-size: 0.85em;
-        }}
-
-        .phase-card.has-cycle .phase-description {{
-            background: #fef2f2;
-            color: #991b1b;
-        }}
-
-        .phase-orgs {{ padding: 16px 20px; list-style: none; }}
-
-        .phase-orgs li {{
-            padding: 10px 12px;
-            margin-bottom: 6px;
-            background: #f8fafc;
-            border-left: 3px solid #3b82f6;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background 0.15s, transform 0.15s;
-        }}
-
-        .phase-orgs li:hover {{ background: #eff6ff; transform: translateX(3px); }}
-        .phase-orgs li.has-deps {{ border-left-color: #f59e0b; }}
-        .phase-orgs li.in-cycle {{ border-left-color: #ef4444; }}
-
-        .phase-orgs .org-name {{ font-weight: 600; }}
-        .phase-orgs .org-meta {{ font-size: 0.8em; color: #64748b; margin-top: 2px; }}
-
-        /* Organization detail */
-        .org-selector {{
-            background: white;
-            padding: 20px 24px;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            margin-bottom: 20px;
-        }}
-
-        .org-dropdown {{ position: relative; max-width: 480px; }}
-
-        .org-dropdown-btn {{
-            width: 100%;
-            padding: 12px 16px;
-            background: white;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            font-size: 0.95em;
-            cursor: pointer;
-            text-align: left;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }}
-
-        .org-dropdown-btn:hover {{ border-color: #3b82f6; }}
-
-        .org-dropdown-menu {{
-            position: absolute;
-            top: calc(100% + 4px);
-            left: 0;
-            right: 0;
-            background: white;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
-            box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-            max-height: 380px;
-            overflow-y: auto;
-            z-index: 100;
-            display: none;
-        }}
-
-        .org-dropdown-menu.open {{ display: block; }}
-
-        .org-dropdown-search {{
-            padding: 12px;
-            border-bottom: 1px solid #e2e8f0;
-            position: sticky;
-            top: 0;
-            background: white;
-        }}
-
-        .org-dropdown-search input {{
-            width: 100%;
-            padding: 8px 10px;
-            border: 1px solid #cbd5e1;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }}
-
-        .org-dropdown-group-title {{
-            padding: 8px 14px;
-            font-size: 0.75em;
-            font-weight: 700;
-            color: #64748b;
-            text-transform: uppercase;
-            background: #f8fafc;
-        }}
-
-        .org-dropdown-item {{
-            padding: 10px 16px;
-            cursor: pointer;
-            border-left: 3px solid transparent;
-        }}
-
-        .org-dropdown-item:hover {{ background: #eff6ff; border-left-color: #3b82f6; }}
-        .org-dropdown-item.independent {{ border-left-color: #10b981; }}
-        .org-dropdown-item.dependent {{ border-left-color: #f59e0b; }}
-        .org-dropdown-item .item-name {{ font-weight: 600; color: #1e293b; }}
-        .org-dropdown-item .item-meta {{ font-size: 0.8em; color: #64748b; margin-top: 2px; }}
-
-        /* Org detail view */
-        .org-detail-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid #e2e8f0;
-            margin-bottom: 18px;
-        }}
-
-        .org-detail-title {{
-            font-size: 1.5em;
-            font-weight: 700;
-            color: #1e293b;
-        }}
-
-        .badge {{
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 0.78em;
-            font-weight: 600;
-        }}
-
-        .badge.success {{ background: #d1fae5; color: #065f46; }}
-        .badge.warning {{ background: #fef3c7; color: #92400e; }}
-        .badge.danger {{ background: #fee2e2; color: #991b1b; }}
-
-        .resource-summary {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 20px;
-        }}
-
-        .resource-chip {{
-            background: #f1f5f9;
-            padding: 6px 12px;
-            border-radius: 6px;
-            font-size: 0.85em;
-            color: #475569;
-        }}
-
-        .resource-chip strong {{ color: #1e293b; }}
-
-        /* Dependency list */
-        .dep-org-block {{
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            margin-bottom: 14px;
-            overflow: hidden;
-        }}
-
-        .dep-org-header {{
-            background: #fef3c7;
-            padding: 12px 18px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
-            user-select: none;
-        }}
-
-        .dep-org-header:hover {{ background: #fde68a; }}
-
-        .dep-org-name {{ font-weight: 700; color: #92400e; }}
-        .dep-org-count {{ font-size: 0.85em; color: #92400e; }}
-        .dep-toggle {{ color: #92400e; font-weight: 700; font-size: 0.9em; }}
-
-        .dep-resources-list {{
-            list-style: none;
-            padding: 0;
-            background: white;
-            display: none;
-        }}
-
-        .dep-resources-list.open {{ display: block; }}
-
-        .dep-resource {{
-            padding: 12px 18px;
-            border-top: 1px solid #f1f5f9;
-        }}
-
-        .dep-resource-header {{
-            display: flex;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 6px;
-        }}
-
-        .dep-resource-name {{ font-weight: 600; color: #1e293b; }}
-        .dep-resource-meta {{ font-size: 0.8em; color: #64748b; }}
-
-        .used-by-label {{
-            font-size: 0.8em;
-            color: #64748b;
-            font-weight: 600;
-            text-transform: uppercase;
-            margin-top: 6px;
-            margin-bottom: 4px;
-        }}
-
-        .used-by-list {{
-            list-style: none;
-            padding-left: 0;
-        }}
-
-        .used-by-list li {{
-            padding: 4px 0 4px 16px;
-            position: relative;
-            font-size: 0.88em;
-            color: #475569;
-        }}
-
-        .used-by-list li::before {{
-            content: "→";
-            position: absolute;
-            left: 0;
-            color: #94a3b8;
-        }}
-
-        .used-by-list li strong {{ color: #1e293b; }}
-
-        .empty-state {{
-            text-align: center;
-            padding: 40px 20px;
-            color: #94a3b8;
-        }}
-
-        .empty-state .empty-icon {{
-            font-size: 3em;
-            margin-bottom: 12px;
-        }}
-
-        .placeholder {{
-            text-align: center;
-            padding: 80px 20px;
-            color: #94a3b8;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-        }}
-
-        .placeholder-icon {{ font-size: 3em; margin-bottom: 16px; }}
-
-        code {{
-            background: #f1f5f9;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: 'SF Mono', Menlo, Consolas, monospace;
-            font-size: 0.88em;
-            color: #1e293b;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>AAP Migration — Dependency Analysis</h1>
-            <div class="subtitle">Source: {source_url} &nbsp;·&nbsp; Analyzed: {analysis_date}</div>
-            <div class="header-controls">
-                <div class="search-box">
-                    <input type="text" class="search-input" id="globalSearch"
-                           placeholder="Search organizations..." onkeyup="globalSearch()">
-                </div>
-                <div class="stats-bar">
-                    <div class="stat-item"><strong>{total_orgs}</strong> Orgs</div>
-                    <div class="stat-item"><strong>{indep_count}</strong> Independent</div>
-                    <div class="stat-item"><strong>{dep_count}</strong> Dependent</div>
-                    <div class="stat-item"><strong>{phase_count}</strong> Phases</div>
-                    <div class="stat-item"><strong>{cycle_count}</strong> Cycles</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="tabs">
-            <button class="tab active" data-tab="overview" onclick="switchTab(event, 'overview')">Overview</button>
-            <button class="tab" data-tab="phases" onclick="switchTab(event, 'phases')">Migration Phases</button>
-            <button class="tab" data-tab="organizations" onclick="switchTab(event, 'organizations')">Organizations</button>
-        </div>
-
-        <div class="main-content">
-            <!-- Overview -->
-            <div class="tab-content active" id="tab-overview">
-                <div class="stat-grid">
-                    <div class="stat-card"><div class="stat-value">{total_orgs}</div>
-                        <div class="stat-label">Total Organizations</div></div>
-                    <div class="stat-card success"><div class="stat-value">{indep_count}</div>
-                        <div class="stat-label">Independent</div></div>
-                    <div class="stat-card warning"><div class="stat-value">{dep_count}</div>
-                        <div class="stat-label">With Dependencies</div></div>
-                    <div class="stat-card"><div class="stat-value">{phase_count}</div>
-                        <div class="stat-label">Migration Phases</div></div>
-                    <div class="stat-card danger"><div class="stat-value">{cycle_count}</div>
-                        <div class="stat-label">Cycles Detected</div></div>
-                </div>
-
-                <div id="cyclesSection"></div>
-
-                <div class="summary-grid">
-                    <div class="card">
-                        <h3>Independent Organizations</h3>
-                        <p class="muted" style="margin-bottom: 12px;">
-                            Can be migrated standalone (no cross-org dependencies).
-                        </p>
-                        <ul class="org-list" id="independentList"></ul>
-                    </div>
-                    <div class="card">
-                        <h3>Organizations With Dependencies</h3>
-                        <p class="muted" style="margin-bottom: 12px;">
-                            Require other organizations to be migrated first.
-                        </p>
-                        <ul class="org-list" id="dependentList"></ul>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Migration Phases -->
-            <div class="tab-content" id="tab-phases">
-                <h2>Migration Phases</h2>
-                <p class="muted" style="margin-bottom: 22px;">
-                    Organizations in the same phase can be migrated in parallel.
-                    Click any organization to view its dependencies.
-                </p>
-                <div class="phases-grid" id="phasesGrid"></div>
-            </div>
-
-            <!-- Organizations -->
-            <div class="tab-content" id="tab-organizations">
-                <div class="org-selector">
-                    <h3 style="margin-bottom: 12px;">Select Organization</h3>
-                    <div class="org-dropdown">
-                        <button class="org-dropdown-btn" onclick="toggleOrgDropdown()">
-                            <span id="selectedOrg">Select an organization…</span>
-                            <span>▾</span>
-                        </button>
-                        <div class="org-dropdown-menu" id="orgDropdownMenu">
-                            <div class="org-dropdown-search">
-                                <input type="text" id="orgSearchInput"
-                                       placeholder="Filter organizations..."
-                                       onkeyup="filterOrgDropdown()">
-                            </div>
-                            <div id="orgDropdownContent"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="orgDetail">
-                    <div class="placeholder">
-                        <div class="placeholder-icon">📋</div>
-                        <div>Select an organization above to view its dependencies.</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+    return {
+        "analysis_date": data.get("analysis_date", ""),
+        "source_url": data.get("source_url", ""),
+        "total_organizations": data.get("total_organizations", len(orgs)),
+        "independent_orgs": data.get("independent_orgs", []),
+        "dependent_orgs": data.get("dependent_orgs", []),
+        "migration_order": data.get("migration_order", []),
+        "phases": [
+            {
+                "phase": p.get("phase"),
+                "description": p.get("description", ""),
+                "orgs": p.get("orgs", []),
+                "has_cycle": p.get("has_cycle", False),
+            }
+            for p in data.get("migration_phases", [])
+        ],
+        "cycles": data.get("cycles", []),
+        "organizations": sorted(orgs, key=lambda o: o["name"].lower()),
+    }
+
+
+def slim_risk(premigration: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Keep only what the dependency UI needs from a pre-migration report."""
+    if not premigration:
+        return None
+    titles: dict[str, list] = {}
+    for f in premigration.get("findings", []):
+        titles.setdefault(f["key"], []).append([f["rc"], f["severity"], f["title"]])
+    resources = {}
+    for key, r in (premigration.get("resources") or {}).items():
+        resources[key] = {
+            "o": r.get("outcome"),
+            "n": r.get("name"),
+            "org": r.get("organization"),
+            "s": bool(r.get("stale")),
+            "f": titles.get(key, [])[:6],
+        }
+    return {
+        "generated": premigration.get("generated"),
+        "summary": {
+            k: premigration.get("summary", {}).get(k)
+            for k in ("total_resources", "outcomes", "predicted_success_pct", "resources_by_rc")
+        },
+        "rc_titles": {rc: c.get("title") for rc, c in (premigration.get("rc_catalog") or {}).items()},
+        "organizations": {
+            n: {
+                "outcomes": o.get("outcomes", {}),
+                "predicted_success_pct": o.get("predicted_success_pct"),
+                "rc": o.get("rc", {}),
+                "total": o.get("total", 0),
+            }
+            for n, o in (premigration.get("organizations") or {}).items()
+        },
+        "resources": resources,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Page
+# ---------------------------------------------------------------------------
+_BODY = """
+<header class="masthead">
+  <div class="wrap">
+    <div class="brand-bar" aria-hidden="true"></div>
+    <div class="titles">
+      <h1>Migration Dependency Map</h1>
+      <p class="assessment-subtitle">Migration AAP __SRC_VERSION__ → 2.6 on OpenShift<span class="sep">·</span>Source AAP __SRC_VERSION__: __SOURCE__<span class="sep">·</span>Date: __DATE__<span class="sep">·</span><span id="riskStamp"></span></p>
     </div>
+    <button class="theme-btn" id="themeBtn" type="button">◐ Theme</button>
+  </div>
+</header>
+<main class="wrap">
+  <section class="success-section">
+    <div class="success-grid">
+      <div class="success-pct-block">
+        <div class="pct" id="headline"></div>
+        <div class="pct-sub" id="headlineSub"></div>
+      </div>
+      <div class="success-detail">
+        <p class="summary-line" id="headlineText"></p>
+        <div class="outcome-row" id="headlineOutcomes"></div>
+      </div>
+    </div>
+    <div id="riskStrip" style="margin-top:16px"></div>
+    <div id="cycleAlert"></div>
+  </section>
 
-    <script>
-        const orgsData = {orgs_json};
-        const phasesData = {phases_json};
-        const cyclesData = {cycles_json};
+  <section class="stat-cards" id="depStatCards" aria-label="Key numbers" style="margin-bottom:8px"></section>
 
-        // ---- utility ----
-        function escapeHtml(s) {{
-            if (s === null || s === undefined) return '';
-            return String(s)
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-                .replace(/'/g, '&#39;');
-        }}
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="waves">Migration waves</button>
+    <button role="tab" data-tab="orgs">Organizations<span class="count" id="cOrgs"></span></button>
+    <button role="tab" data-tab="links">Cross-org links<span class="count" id="cLinks"></span></button>
+    <button role="tab" data-tab="blockers" id="tabBlockers" hidden>Blockers<span class="count" id="cBlockers"></span></button>
+  </nav>
 
-        function orgByName(name) {{
-            return orgsData.find(o => o.name === name);
-        }}
+  <section class="panel" id="panel-waves" role="tabpanel">
+    <p class="section-desc">Organizations in the same wave can be migrated in parallel. A wave starts when every previous wave is done. Select an organization to see what it needs and what may break.</p>
+    <div class="waves" id="waves"></div>
+  </section>
 
-        function orgInCycle(name) {{
-            return cyclesData.some(c => c.includes(name));
-        }}
+  <section class="panel" id="panel-orgs" role="tabpanel" hidden>
+    <div class="orgs-layout">
+      <aside class="org-list">
+        <div class="field"><label for="oSearch">Find organization</label><input type="search" id="oSearch" placeholder="Name"></div>
+        <div class="chips" id="oFilter" role="group" aria-label="Filter organizations"></div>
+        <div class="field"><label for="oSort">Sort by</label><select id="oSort">
+          <option value="name">Name</option><option value="wave">Wave</option><option value="size">Objects</option>
+          <option value="deps">Dependencies</option><option value="risk">Failing objects</option></select></div>
+        <ul id="orgItems"></ul>
+      </aside>
+      <div id="orgDetail" class="org-detail"><div class="empty">Select an organization on the left.</div></div>
+    </div>
+  </section>
 
-        // ---- init ----
-        window.addEventListener('load', () => {{
-            renderCycles();
-            renderOverviewLists();
-            renderPhases();
-            renderOrgDropdown();
-        }});
+  <section class="panel" id="panel-links" role="tabpanel" hidden>
+    <p class="section-desc">Every cross-organization dependency: resources owned by one organization but used by another. These links determine migration order.</p>
+    <div class="toolbar">
+      <div class="field"><label for="lSearch">Search</label><input type="search" id="lSearch" placeholder="Organization or resource"></div>
+      <div class="field"><label for="lType">Resource type</label><select id="lType"></select></div>
+      <div class="field" id="lRiskField" hidden><label for="lRisk">Predicted outcome</label><select id="lRisk"></select></div>
+      <button class="btn" type="button" id="lCsv">↓ CSV</button>
+      <span class="result-count" id="lCount"></span>
+    </div>
+    <div id="linksTable"></div>
+  </section>
 
-        window.addEventListener('click', (e) => {{
-            if (!e.target.closest('.org-dropdown')) {{
-                document.getElementById('orgDropdownMenu').classList.remove('open');
-            }}
-        }});
+  <section class="panel" id="panel-blockers" role="tabpanel" hidden>
+    <p class="section-desc">Shared objects predicted to fail or at risk that block other organizations. Fix these first.</p>
+    <div id="blockersTable"></div>
+  </section>
+</main>
+"""
 
-        // ---- tabs ----
-        function switchTab(event, tabName) {{
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            event.currentTarget.classList.add('active');
-            document.getElementById('tab-' + tabName).classList.add('active');
-        }}
+_EXTRA_CSS = """
+<style>
+.waves { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: 0; overflow-x: auto; padding-bottom: 8px; }
+.wave { padding: 0 16px; border-left: 1px solid var(--line); min-width: 250px; }
+.wave:first-child { border-left: 0; padding-left: 0; }
+.wave-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.wave-num { font-family: "Red Hat Display", system-ui, sans-serif; font-size: 2rem; font-weight: 700; line-height: 1; color: var(--ink-3); }
+.wave-sub { color: var(--ink-3); font-size: 0.85rem; margin-bottom: 12px; min-height: 2.6em; }
+.org-chip { display: block; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-m); padding: 9px 11px 10px; margin-bottom: 8px; cursor: pointer; }
+.org-chip:hover { border-color: var(--ink-3); }
+.org-chip .nm { font-weight: 600; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.org-chip .mt { color: var(--ink-3); font-size: 0.82rem; }
+.org-chip .mini { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 7px; background: var(--line-2); }
+.org-chip .mini span { height: 100%; }
+.org-chip.cycle { border-style: dashed; border-color: var(--at_risk); }
+.alert { border-left: 4px solid var(--at_risk); background: var(--at_risk-bg); padding: 10px 14px; border-radius: var(--radius-s); margin-top: 16px; }
+.alert strong { color: var(--ink); }
+.orgs-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 900px) { .orgs-layout { grid-template-columns: minmax(0, 1fr); } }
+.org-list { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; }
+.org-list .field input, .org-list .field select { min-width: 0; width: 100%; }
+.org-list ul { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface); }
+.org-list li button { all: unset; box-sizing: border-box; display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--line-2); }
+.org-list li button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.org-list li button[aria-current="true"] { background: var(--line-2); font-weight: 600; }
+.org-list li:last-child button { border-bottom: 0; }
+.org-list .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; flex: none; transform: translateY(-1px); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 3px 10px; cursor: pointer; font-size: 0.85rem; }
+.chips button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.org-detail h2 { font-size: 1.5rem; }
+.kpis { display: flex; flex-wrap: wrap; gap: 10px 34px; margin: 16px 0 20px; }
+.kpis div { display: flex; flex-direction: column; }
+.kpis .v { font-size: 1.5rem; font-weight: 700; font-family: "Red Hat Display", system-ui, sans-serif; }
+.kpis .k { color: var(--ink-3); font-size: 0.85rem; }
+.linkchips button { border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius-s); padding: 3px 9px; margin: 0 6px 6px 0; cursor: pointer; }
+.linkchips button:hover { border-color: var(--ink-3); }
+details.dep { border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--surface); margin-bottom: 10px; }
+details.dep > summary { cursor: pointer; padding: 10px 14px; display: flex; gap: 12px; align-items: center; justify-content: space-between; list-style: none; }
+details.dep > summary::-webkit-details-marker { display: none; }
+details.dep > summary::before { content: "+"; font-weight: 700; color: var(--ink-3); width: 1em; }
+details.dep[open] > summary::before { content: "\\2212"; }
+details.dep > summary .grow { flex: 1; font-weight: 600; }
+details.dep .inner { padding: 0 14px 12px; }
+.deprow { border-top: 1px solid var(--line-2); padding: 9px 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
+.deprow .used { grid-column: 1 / -1; color: var(--ink-2); font-size: 0.86rem; }
+.deprow .used li { margin: 2px 0; }
+.deprow ul { margin: 4px 0 0; padding-left: 18px; }
+.why { font-size: 0.84rem; color: var(--ink-2); grid-column: 1 / -1; }
+</style>
+"""
 
-        function activateTab(tabName) {{
-            document.querySelectorAll('.tab').forEach(t => {{
-                t.classList.toggle('active', t.dataset.tab === tabName);
-            }});
-            document.querySelectorAll('.tab-content').forEach(c => {{
-                c.classList.toggle('active', c.id === 'tab-' + tabName);
-            }});
-        }}
+_SCRIPT = r"""
+const ORGS = DEPS.organizations;
+const byName = {}; ORGS.forEach(o => byName[o.name] = o);
+const waveOf = {}; DEPS.phases.forEach(p => p.orgs.forEach(n => waveOf[n] = p.phase));
+const inCycle = new Set(); (DEPS.cycles || []).forEach(c => c.forEach(n => inCycle.add(n)));
+const neededBy = {}; ORGS.forEach(o => o.required_before.forEach(d => (neededBy[d] = neededBy[d] || []).push(o.name)));
+const HAS_RISK = !!RISK;
+const R = HAS_RISK ? RISK.resources : {};
+function risk(type, id) { return R[type + ':' + id]; }
+function outcomeOf(type, id) { const r = risk(type, id); return r ? r.o : (HAS_RISK ? 'ready' : null); }
+function orgRisk(name) { return HAS_RISK ? (RISK.organizations[name] || null) : null; }
+function failing(name) { const r = orgRisk(name); return r ? (r.outcomes.will_fail || 0) : 0; }
+function mini(name) {
+  const r = orgRisk(name); if (!r) return '';
+  return '<div class="mini">' + OUTCOMES.filter(k => r.outcomes[k]).map(k => '<span style="flex:' + r.outcomes[k] + ';background:var(--' + k + ')"></span>').join('') + '</div>';
+}
+function orgDot(name) {
+  const r = orgRisk(name); if (!r) return '';
+  const o = r.outcomes.will_fail ? 'will_fail' : r.outcomes.at_risk ? 'at_risk' : r.outcomes.needs_action ? 'needs_action' : 'ready';
+  return '<span class="dot" style="background:var(--' + o + ')" title="' + OUTCOME_LABEL[o] + '"></span>';
+}
 
-        // ---- search ----
-        function globalSearch() {{
-            const q = document.getElementById('globalSearch').value.toLowerCase().trim();
-            if (!q) return;
-            const org = orgsData.find(o => o.name.toLowerCase().includes(q));
-            if (org) {{
-                activateTab('organizations');
-                selectOrg(org.name);
-            }}
-        }}
+/* All cross-org edges, flattened */
+const LINKS = [];
+ORGS.forEach(o => o.dependencies.forEach(d => d.resources.forEach(r => LINKS.push({
+  org: o.name, from: d.org, type: r.type, id: r.id, name: r.name, used_by: r.used_by, uses: r.used_by.length,
+  outcome: outcomeOf(r.type, r.id)
+}))));
 
-        // ---- cycles ----
-        function renderCycles() {{
-            const section = document.getElementById('cyclesSection');
-            if (!cyclesData || cyclesData.length === 0) {{
-                section.innerHTML = '';
-                return;
-            }}
+function header() {
+  const waves = DEPS.phases.length;
+  const ind = DEPS.independent_orgs.length, dep = DEPS.dependent_orgs.length;
+  $('#headline').textContent = waves + (waves === 1 ? ' wave' : ' waves');
+  $('#headlineSub').textContent = 'migration plan';
+  let txt = fmtNum(ORGS.length) + ' organizations to migrate. ' + fmtNum(ind) + ' independent, ' + fmtNum(dep) +
+    ' share objects through ' + fmtNum(LINKS.length) + ' cross-org links.';
+  if (HAS_RISK) {
+    txt += ' Predicted first-pass success: ' + RISK.summary.predicted_success_pct + '%.';
+    const out = RISK.summary.outcomes;
+    const items = [{k:'will_fail',l:'Will fail'},{k:'at_risk',l:'At risk'},{k:'needs_action',l:'Needs action'},{k:'stale',l:'Stale'},{k:'ready',l:'Ready'}];
+    $('#headlineOutcomes').innerHTML = items.map(i =>
+      '<div class="outcome-item"><span class="o-dot" style="background:var(--' + i.k + ')"></span><span class="o-val">' + fmtNum(out[i.k] || 0) + '</span><span class="o-lbl">' + i.l + '</span></div>'
+    ).join('');
+    $('#riskStamp').textContent = 'Pre-migration data: ' + String(RISK.generated || '').slice(0, 16).replace('T', ' ');
+    $('#riskStrip').innerHTML = '<div class="strip" id="strip"></div><div class="legend" id="legend"></div>';
+    renderStrip($('#strip'), out); renderLegend($('#legend'), out);
+  } else {
+    $('#riskStamp').textContent = 'No pre-migration data';
+  }
+  $('#headlineText').textContent = txt;
+  const cards = [
+    {v: fmtNum(ORGS.length), l: 'Organizations'},
+    {v: fmtNum(waves), l: 'Waves'},
+    {v: fmtNum(ind), l: 'Independent'},
+    {v: fmtNum(dep), l: 'With dependencies'},
+    {v: fmtNum(LINKS.length), l: 'Cross-org links'},
+  ];
+  if (HAS_RISK) cards.push({v: RISK.summary.predicted_success_pct + '%', l: 'First-pass success'});
+  $('#depStatCards').innerHTML = cards.map(c =>
+    '<div class="stat-card"><div class="stat-value">' + c.v + '</div><div class="stat-label">' + c.l + '</div></div>'
+  ).join('');
+  if (DEPS.cycles && DEPS.cycles.length) {
+    $('#cycleAlert').innerHTML = '<div class="alert"><strong>' + DEPS.cycles.length + ' circular dependenc' + (DEPS.cycles.length === 1 ? 'y' : 'ies') + '.</strong> ' +
+      DEPS.cycles.map(c => esc(c.join(', '))).join('; ') + '. These organizations must move together.</div>';
+  }
+  $('#cOrgs').textContent = fmtNum(ORGS.length); $('#cLinks').textContent = fmtNum(LINKS.length);
+}
 
-            let html = '<div class="cycles-card">';
-            html += '<h3>⚠️ Cyclic Dependencies Detected</h3>';
-            html += '<p class="muted" style="margin-bottom: 8px;">';
-            html += 'These organizations have mutual cross-references and cannot be ordered. ';
-            html += 'They must be migrated as a unit, or the cross-references must be broken in the source.';
-            html += '</p>';
-            cyclesData.forEach((cycle, i) => {{
-                html += '<div class="cycle-item">';
-                html += '<div class="cycle-label">Cycle ' + (i + 1) + ' — ' + cycle.length + ' orgs</div>';
-                html += '<ul class="cycle-orgs">';
-                cycle.forEach(name => {{
-                    html += '<li onclick="activateTab(\\'organizations\\'); selectOrg(\\''
-                          + escapeHtml(name).replace(/'/g, "\\\\'") + '\\')">'
-                          + escapeHtml(name) + '</li>';
-                }});
-                html += '</ul>';
-                html += '</div>';
-            }});
-            html += '</div>';
-            section.innerHTML = html;
-        }}
+function wavesTab() {
+  $('#waves').innerHTML = DEPS.phases.map(p => {
+    const orgs = p.orgs.slice().sort((a, b) => failing(b) - failing(a) || a.localeCompare(b));
+    const fail = orgs.reduce((a, n) => a + failing(n), 0);
+    return '<section class="wave"><div class="wave-head"><span class="wave-num">' + p.phase + '</span><h3>Wave ' + p.phase + '</h3></div>' +
+      '<div class="wave-sub">' + fmtNum(orgs.length) + ' organization' + (orgs.length === 1 ? '' : 's') +
+      (HAS_RISK && fail ? ', <strong style="color:var(--will_fail)">' + fmtNum(fail) + ' objects will fail</strong>' : '') +
+      (p.has_cycle ? '<br>includes a circular dependency' : '') + '</div>' +
+      orgs.map(n => { const o = byName[n] || {total_resources: 0, required_before: []};
+        const meta = fmtNum(o.total_resources) + ' objects' + (o.required_before.length ? ', needs ' + o.required_before.length : '') +
+          (HAS_RISK && failing(n) ? ', ' + failing(n) + ' will fail' : '');
+        return '<button class="org-chip' + (inCycle.has(n) ? ' cycle' : '') + '" data-org="' + esc(n) + '" type="button"><span class="nm">' + esc(n) + '</span><span class="mt">' + meta + '</span>' + mini(n) + '</button>';
+      }).join('') + '</section>';
+  }).join('');
+  $all('.org-chip').forEach(b => b.addEventListener('click', () => selectOrg(b.dataset.org)));
+}
 
-        // ---- overview lists ----
-        function renderOverviewLists() {{
-            const indList = document.getElementById('independentList');
-            const depList = document.getElementById('dependentList');
+/* Organizations */
+let orgFilter = 'all', current = null;
+function orgsTab() {
+  const filters = [['all', 'All'], ['independent', 'Standalone'], ['dependent', 'Has dependencies']];
+  if (HAS_RISK) filters.push(['failing', 'Has failures']);
+  $('#oFilter').innerHTML = filters.map(([k, l]) => '<button type="button" data-f="' + k + '" aria-pressed="' + (k === orgFilter) + '">' + l + '</button>').join('');
+  $all('#oFilter button').forEach(b => b.addEventListener('click', () => { orgFilter = b.dataset.f; $all('#oFilter button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); listOrgs(); }));
+  if (!HAS_RISK) $('#oSort option[value="risk"]').remove();
+  $('#oSearch').addEventListener('input', listOrgs); $('#oSort').addEventListener('input', listOrgs);
+  listOrgs();
+}
+function listOrgs() {
+  const q = $('#oSearch').value.trim().toLowerCase(), sort = $('#oSort').value;
+  let list = ORGS.filter(o => (!q || o.name.toLowerCase().includes(q)) &&
+    (orgFilter === 'all' || (orgFilter === 'independent' && !o.has_dependencies) || (orgFilter === 'dependent' && o.has_dependencies) || (orgFilter === 'failing' && failing(o.name))));
+  const keyf = {name: o => o.name.toLowerCase(), wave: o => waveOf[o.name] || 0, size: o => -o.total_resources, deps: o => -o.required_before.length, risk: o => -failing(o.name)}[sort];
+  list.sort((a, b) => { const x = keyf(a), y = keyf(b); return x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name); });
+  $('#orgItems').innerHTML = list.length ? list.map(o => '<li><button type="button" data-org="' + esc(o.name) + '" aria-current="' + (o.name === current) + '"><span>' + orgDot(o.name) + esc(o.name) + '</span><span class="muted small">wave ' + (waveOf[o.name] || '?') + '</span></button></li>').join('')
+    : '<li><div class="empty">No organization matches.</div></li>';
+  $all('#orgItems button').forEach(b => b.addEventListener('click', () => selectOrg(b.dataset.org, true)));
+}
+function selectOrg(name, stay) {
+  current = name; if (!stay) showTab('orgs', true); listOrgs();
+  const o = byName[name]; if (!o) { $('#orgDetail').innerHTML = '<div class="empty">No details for ' + esc(name) + '.</div>'; return; }
+  const r = orgRisk(name), nb = (neededBy[name] || []).sort();
+  let h = '<p class="muted small">Wave ' + (waveOf[name] || '?') + (inCycle.has(name) ? ', part of a circular dependency' : '') + '</p><h2>' + esc(name) + '</h2>';
+  h += '<p style="margin-top:6px">' + (o.has_dependencies ? 'Uses objects owned by ' + o.required_before.length + ' other organization' + (o.required_before.length === 1 ? '' : 's') + ': migrate those first.' : 'Self-contained: can be migrated on its own.') +
+    (nb.length ? ' ' + nb.length + ' organization' + (nb.length === 1 ? ' depends' : 's depend') + ' on it.' : '') + '</p>';
+  h += '<div class="kpis"><div><span class="v">' + fmtNum(o.total_resources) + '</span><span class="k">objects</span></div>' +
+    '<div><span class="v">' + o.required_before.length + '</span><span class="k">depends on</span></div><div><span class="v">' + nb.length + '</span><span class="k">needed by</span></div>';
+  if (r) h += '<div><span class="v" style="color:var(--will_fail)">' + fmtNum(r.outcomes.will_fail || 0) + '</span><span class="k">will fail</span></div>' +
+    '<div><span class="v">' + fmtNum(r.outcomes.at_risk || 0) + '</span><span class="k">at risk</span></div><div><span class="v">' + r.predicted_success_pct + '%</span><span class="k">first-pass success</span></div>';
+  h += '</div>';
+  if (r) { h += '<div class="strip" id="orgStrip" style="height:14px"></div><div class="legend" id="orgLegend"></div>'; }
+  if (o.required_before.length) h += '<h3 style="margin-top:24px">Migrate these first</h3><div class="linkchips" style="margin-top:8px">' + o.required_before.map(n => '<button type="button" data-org="' + esc(n) + '">' + orgDot(n) + esc(n) + '</button>').join('') + '</div>';
+  if (nb.length) h += '<h3 style="margin-top:18px">Waiting for this organization</h3><div class="linkchips" style="margin-top:8px">' + nb.map(n => '<button type="button" data-org="' + esc(n) + '">' + orgDot(n) + esc(n) + '</button>').join('') + '</div>';
 
-            const indOrgs = orgsData.filter(o => !o.has_dependencies);
-            const depOrgs = orgsData.filter(o => o.has_dependencies);
+  if (o.dependencies.length) {
+    h += '<h3 style="margin:26px 0 10px">Objects borrowed from other organizations</h3>';
+    o.dependencies.forEach(d => {
+      const bad = d.resources.filter(x => ['will_fail', 'at_risk'].includes(outcomeOf(x.type, x.id))).length;
+      const badCls = d.resources.some(x => outcomeOf(x.type, x.id) === 'will_fail') ? 'will_fail' : 'at_risk';
+      h += '<details class="dep"' + (bad ? ' open' : '') + '><summary><span class="grow">' + esc(d.org) + '</span><span class="muted small">' + d.resources.length + ' object' + (d.resources.length === 1 ? '' : 's') + '</span>' +
+        (bad ? '<span class="pill o-' + badCls + '">' + bad + ' blocking</span>' : '') + '</summary><div class="inner">';
+      d.resources.forEach(x => {
+        const ro = outcomeOf(x.type, x.id), rr = risk(x.type, x.id);
+        h += '<div class="deprow"><div><strong>' + esc(x.name) + '</strong> <span class="muted small">' + esc(typeLabel(x.type)) + ' #' + esc(x.id) + '</span></div><div>' + (ro ? pill(ro) : '') + '</div>';
+        if (rr && rr.f.length) h += '<div class="why">' + rr.f.filter(f => f[0] !== 'STALE' || rr.f.length === 1).map(f => '<span class="rc">' + esc(f[0]) + '</span> ' + esc(f[2])).join('; ') + '</div>';
+        h += '<div class="used">Used here by<ul>' + x.used_by.map(u => { const uo = outcomeOf(u.type, u.id);
+          return '<li>' + esc(u.name) + ' <span class="muted">' + esc(typeLabel(u.type)) + ' #' + esc(u.id) + '</span> ' + (uo && uo !== 'ready' ? pill(uo) : '') + '</li>'; }).join('') + '</ul></div></div>';
+      });
+      h += '</div></details>';
+    });
+  }
 
-            if (indOrgs.length === 0) {{
-                indList.innerHTML = '<li class="empty-state" style="padding: 20px;">None</li>';
-            }} else {{
-                indList.innerHTML = indOrgs.map(o =>
-                    '<li class="independent" onclick="activateTab(\\'organizations\\'); selectOrg(\\''
-                    + o.name.replace(/'/g, "\\\\'") + '\\')">'
-                    + '<div class="org-name">' + escapeHtml(o.name) + '</div>'
-                    + '<div class="org-meta">' + o.total_resources + ' resources</div>'
-                    + '</li>'
-                ).join('');
-            }}
+  h += '<h3 style="margin:26px 0 10px">What it contains</h3><div class="table-wrap" style="max-height:none"><table class="data"><thead><tr><th>Type</th><th class="num">Objects</th></tr></thead><tbody>' +
+    (o.resource_summary.length ? o.resource_summary.map(s => '<tr><td>' + esc(typeLabel(s.type)) + '</td><td class="num">' + fmtNum(s.count) + '</td></tr>').join('') : '<tr><td colspan="2" class="muted">No objects found.</td></tr>') + '</tbody></table></div>';
 
-            if (depOrgs.length === 0) {{
-                depList.innerHTML = '<li class="empty-state" style="padding: 20px;">None</li>';
-            }} else {{
-                depList.innerHTML = depOrgs.map(o => {{
-                    const reqs = o.required_before.length > 0
-                        ? ' · Requires: ' + o.required_before.map(escapeHtml).join(', ')
-                        : '';
-                    return '<li class="dependent" onclick="activateTab(\\'organizations\\'); selectOrg(\\''
-                        + o.name.replace(/'/g, "\\\\'") + '\\')">'
-                        + '<div class="org-name">' + escapeHtml(o.name) + '</div>'
-                        + '<div class="org-meta">' + o.total_resources + ' resources' + reqs + '</div>'
-                        + '</li>';
-                }}).join('');
-            }}
-        }}
+  if (HAS_RISK) {
+    const items = Object.entries(R).filter(([k, v]) => v.org === name && ['will_fail', 'at_risk'].includes(v.o)).sort((a, b) => (a[1].o === 'will_fail' ? 0 : 1) - (b[1].o === 'will_fail' ? 0 : 1));
+    h += '<h3 style="margin:26px 0 10px">Objects in this organization that will fail or are at risk</h3>';
+    h += items.length ? '<div class="table-wrap"><table class="data"><thead><tr><th>Outcome</th><th>Object</th><th>Why</th></tr></thead><tbody>' +
+      items.slice(0, 200).map(([k, v]) => '<tr><td>' + pill(v.o) + '</td><td><strong>' + esc(v.n) + '</strong><div class="muted small">' + esc(typeLabel(k.split(':')[0])) + ' #' + esc(k.split(':')[1]) + '</div></td><td>' +
+        v.f.filter(f => f[0] !== 'STALE').map(f => '<span class="rc">' + esc(f[0]) + '</span> ' + esc(f[2])).join('<br>') + '</td></tr>').join('') + '</tbody></table></div>' +
+      (items.length > 200 ? '<p class="muted small" style="margin-top:6px">Showing 200 of ' + items.length + '. The pre-migration report lists all of them.</p>' : '')
+      : '<p class="muted">Nothing predicted to fail in this organization.</p>';
+  }
+  $('#orgDetail').innerHTML = h;
+  if (r) { renderStrip($('#orgStrip'), r.outcomes); renderLegend($('#orgLegend'), r.outcomes); }
+  $all('#orgDetail button[data-org]').forEach(b => b.addEventListener('click', () => selectOrg(b.dataset.org, true)));
+  $('#orgDetail').scrollIntoView({block: 'nearest'});
+}
 
-        // ---- phases ----
-        function renderPhases() {{
-            const grid = document.getElementById('phasesGrid');
-            grid.innerHTML = phasesData.map(phase => {{
-                const orgItems = phase.orgs.map(name => {{
-                    const o = orgByName(name);
-                    if (!o) return '';
-                    const classes = ['', o.has_dependencies ? 'has-deps' : '', orgInCycle(name) ? 'in-cycle' : '']
-                                    .filter(Boolean).join(' ');
-                    const reqs = o.has_dependencies && o.required_before.length > 0
-                        ? ' · Requires: ' + o.required_before.map(escapeHtml).join(', ')
-                        : '';
-                    return '<li class="' + classes + '" onclick="activateTab(\\'organizations\\'); selectOrg(\\''
-                        + name.replace(/'/g, "\\\\'") + '\\')">'
-                        + '<div class="org-name">' + escapeHtml(name) + '</div>'
-                        + '<div class="org-meta">' + o.total_resources + ' resources' + reqs + '</div>'
-                        + '</li>';
-                }}).join('');
+/* Links */
+function linksTab() {
+  fillSelect($('#lType'), [...new Set(LINKS.map(l => l.type))].sort(), 'All types', typeLabel);
+  if (HAS_RISK) { $('#lRiskField').hidden = false; fillSelect($('#lRisk'), OUTCOMES, 'Any', k => OUTCOME_LABEL[k]); }
+  const cols = [
+    {key: 'org', label: 'Organization', render: l => '<strong>' + esc(l.org) + '</strong>'},
+    {key: 'from', label: 'Borrows from'},
+    {key: 'name', label: 'Shared object', render: l => esc(l.name) + '<div class="muted small">' + esc(typeLabel(l.type)) + ' #' + esc(l.id) + '</div>'},
+    {key: 'uses', label: 'Used by', cls: 'num', render: l => fmtNum(l.uses)}
+  ];
+  if (HAS_RISK) cols.push({key: 'outcome', label: 'Predicted', render: l => pill(l.outcome), sort: l => OUTCOMES.indexOf(l.outcome)});
+  const t = DataTable($('#linksTable'), cols, {onRow: l => selectOrg(l.org), sortKey: HAS_RISK ? 'outcome' : 'org'});
+  const apply = () => {
+    const q = $('#lSearch').value.trim().toLowerCase(), ty = $('#lType').value, ro = HAS_RISK ? $('#lRisk').value : '';
+    const rows = LINKS.filter(l => (!ty || l.type === ty) && (!ro || l.outcome === ro) && (!q || (l.org + ' ' + l.from + ' ' + l.name).toLowerCase().includes(q)));
+    t.set(rows); $('#lCount').textContent = fmtNum(rows.length) + ' links';
+  };
+  ['lSearch', 'lType', 'lRisk'].forEach(id => $('#' + id).addEventListener('input', apply));
+  $('#lCsv').addEventListener('click', () => downloadCSV('cross-org-dependencies.csv', ['Organization', 'Borrows from', 'Type', 'ID', 'Shared object', 'Used by', 'Used by objects', 'Predicted outcome'],
+    t.rows().map(l => [l.org, l.from, l.type, l.id, l.name, l.uses, l.used_by.map(u => u.type + ':' + u.id + ' ' + u.name).join('; '), l.outcome ? OUTCOME_LABEL[l.outcome] : ''])));
+  apply();
+}
 
-                const cardClass = phase.has_cycle ? 'phase-card has-cycle' : 'phase-card';
-                return '<div class="' + cardClass + '">'
-                    + '<div class="phase-header">Phase ' + phase.phase + '</div>'
-                    + '<div class="phase-description">' + escapeHtml(phase.description) + '</div>'
-                    + '<ul class="phase-orgs">' + orgItems + '</ul>'
-                    + '</div>';
-            }}).join('');
-        }}
+function blockersTab() {
+  if (!HAS_RISK) return;
+  const map = {};
+  LINKS.filter(l => ['will_fail', 'at_risk'].includes(l.outcome)).forEach(l => {
+    const k = l.type + ':' + l.id;
+    const b = map[k] = map[k] || {key: k, type: l.type, id: l.id, name: l.name, owner: l.from, outcome: l.outcome, orgs: new Set(), uses: 0};
+    b.orgs.add(l.org); b.uses += l.uses;
+  });
+  const rows = Object.values(map).map(b => Object.assign(b, {norgs: b.orgs.size, orglist: [...b.orgs].sort().join(', '), why: (risk(b.type, b.id) || {f: []}).f.filter(f => f[0] !== 'STALE').map(f => f[0] + ' ' + f[2]).join('; ')}));
+  $('#tabBlockers').hidden = false; $('#cBlockers').textContent = fmtNum(rows.length);
+  const t = DataTable($('#blockersTable'), [
+    {key: 'outcome', label: 'Predicted', render: b => pill(b.outcome), sort: b => OUTCOMES.indexOf(b.outcome)},
+    {key: 'name', label: 'Shared object', render: b => '<strong>' + esc(b.name) + '</strong><div class="muted small">' + esc(typeLabel(b.type)) + ' #' + esc(b.id) + ', owned by ' + esc(b.owner) + '</div>'},
+    {key: 'why', label: 'Why', render: b => esc(b.why)},
+    {key: 'norgs', label: 'Blocks organizations', render: b => '<strong>' + b.norgs + '</strong> <span class="muted small">' + esc(b.orglist) + '</span>', sort: b => -b.norgs},
+    {key: 'uses', label: 'Dependent objects', cls: 'num', render: b => fmtNum(b.uses), sort: b => -b.uses}
+  ], {onRow: b => selectOrg(b.owner), sortKey: 'norgs', empty: 'No shared object is predicted to fail.'});
+  t.set(rows);
+}
 
-        // ---- org dropdown ----
-        function renderOrgDropdown() {{
-            const content = document.getElementById('orgDropdownContent');
-            const indOrgs = orgsData.filter(o => !o.has_dependencies);
-            const depOrgs = orgsData.filter(o => o.has_dependencies);
+initTheme(); initDrawer();
+header(); wavesTab(); orgsTab(); linksTab(); blockersTab();
+const showTab = initTabs();
+"""
 
-            let html = '';
-            if (indOrgs.length > 0) {{
-                html += '<div class="org-dropdown-group-title">✓ Independent (' + indOrgs.length + ')</div>';
-                html += indOrgs.map(o => dropdownItem(o, 'independent')).join('');
-            }}
-            if (depOrgs.length > 0) {{
-                html += '<div class="org-dropdown-group-title">⚠ With Dependencies (' + depOrgs.length + ')</div>';
-                html += depOrgs.map(o => dropdownItem(o, 'dependent')).join('');
-            }}
-            content.innerHTML = html;
-        }}
 
-        function dropdownItem(org, cls) {{
-            return '<div class="org-dropdown-item ' + cls + '" onclick="selectOrg(\\''
-                + org.name.replace(/'/g, "\\\\'") + '\\')">'
-                + '<div class="item-name">' + escapeHtml(org.name) + '</div>'
-                + '<div class="item-meta">' + org.total_resources + ' resources</div>'
-                + '</div>';
-        }}
+def render_dependency_html(view: dict[str, Any], risk: dict[str, Any] | None = None) -> str:
+    """Render the Dependency Analyzer UI from a view model (+ optional risk data)."""
+    src_version = "2.4"
+    if risk:
+        src_version = str((risk.get("source") or {}).get("version") or "2.4")
+    body = (
+        _EXTRA_CSS
+        + _BODY.replace("__SOURCE__", escape(view.get("source_url") or "source AAP"))
+        .replace("__DATE__", escape(str(view.get("analysis_date", ""))[:16].replace("T", " ")))
+        .replace("__SRC_VERSION__", escape(src_version))
+    )
+    return page("Migration Dependency Map", body, _SCRIPT, {"DEPS": view, "RISK": slim_risk(risk)})
 
-        function toggleOrgDropdown() {{
-            document.getElementById('orgDropdownMenu').classList.toggle('open');
-        }}
 
-        function filterOrgDropdown() {{
-            const q = document.getElementById('orgSearchInput').value.toLowerCase();
-            document.querySelectorAll('.org-dropdown-item').forEach(item => {{
-                const txt = item.textContent.toLowerCase();
-                item.style.display = txt.includes(q) ? 'block' : 'none';
-            }});
-            document.querySelectorAll('.org-dropdown-group-title').forEach(t => {{
-                t.style.display = q ? 'none' : 'block';
-            }});
-        }}
+def generate_html_report(
+    report: GlobalDependencyReport,
+    risk_report: dict[str, Any] | None = None,
+) -> str:
+    """Generate the self-contained dependency HTML report.
 
-        // ---- org detail ----
-        function selectOrg(name) {{
-            const org = orgByName(name);
-            if (!org) return;
+    Args:
+        report: Global dependency analysis report
+        risk_report: optional dict produced by ``premigration-report`` (JSON)
 
-            document.getElementById('selectedOrg').textContent = name;
-            document.getElementById('orgDropdownMenu').classList.remove('open');
-            document.getElementById('orgDetail').innerHTML = renderOrgDetail(org);
-        }}
-
-        function renderOrgDetail(org) {{
-            const inCycle = orgInCycle(org.name);
-            let badge = '';
-            if (inCycle) {{
-                badge = '<span class="badge danger">In Cycle</span>';
-            }} else if (org.has_dependencies) {{
-                badge = '<span class="badge warning">' + org.dependencies.length + ' Dependencies</span>';
-            }} else {{
-                badge = '<span class="badge success">Standalone</span>';
-            }}
-
-            let html = '<div class="card">';
-            html += '<div class="org-detail-header">';
-            html += '<div>';
-            html += '<div class="org-detail-title">' + escapeHtml(org.name) + '</div>';
-            html += '<div class="muted">ID ' + org.id + ' · ' + org.total_resources + ' total resources</div>';
-            html += '</div>';
-            html += '<div>' + badge + '</div>';
-            html += '</div>';
-
-            // Resource summary chips
-            if (org.resource_summary.length > 0) {{
-                html += '<div class="resource-summary">';
-                org.resource_summary.forEach(r => {{
-                    html += '<div class="resource-chip">'
-                          + escapeHtml(r.display) + ': <strong>' + r.count + '</strong>'
-                          + '</div>';
-                }});
-                html += '</div>';
-            }}
-
-            // Dependencies
-            html += '<h3 style="margin-top: 8px;">Cross-Org Dependencies</h3>';
-
-            if (!org.has_dependencies) {{
-                html += '<div class="empty-state" style="padding: 24px;">'
-                      + '<div class="empty-icon">✓</div>'
-                      + '<div>No cross-organization dependencies.</div>'
-                      + '<div class="muted" style="margin-top: 8px;">'
-                      + 'Can be migrated standalone: <code>aap-bridge migrate -o &quot;'
-                      + escapeHtml(org.name) + '&quot;</code>'
-                      + '</div>'
-                      + '</div>';
-            }} else {{
-                org.dependencies.forEach((dep, idx) => {{
-                    const blockId = 'dep-' + idx;
-                    html += '<div class="dep-org-block">';
-                    html += '<div class="dep-org-header" onclick="toggleDepBlock(\\'' + blockId + '\\')">';
-                    html += '<div>';
-                    html += '<div class="dep-org-name">Depends on: ' + escapeHtml(dep.org) + '</div>';
-                    html += '<div class="dep-org-count">' + dep.resource_count
-                          + ' resource' + (dep.resource_count === 1 ? '' : 's') + ' required</div>';
-                    html += '</div>';
-                    html += '<div class="dep-toggle" id="' + blockId + '-toggle">▾</div>';
-                    html += '</div>';
-                    html += '<ul class="dep-resources-list open" id="' + blockId + '">';
-                    dep.resources.forEach(res => {{
-                        html += '<li class="dep-resource">';
-                        html += '<div class="dep-resource-header">';
-                        html += '<div>';
-                        html += '<span class="dep-resource-name">' + escapeHtml(res.name) + '</span>';
-                        html += ' <span class="dep-resource-meta">'
-                              + escapeHtml(res.type_display) + ' · ID ' + res.id + '</span>';
-                        html += '</div>';
-                        html += '</div>';
-                        if (res.used_by && res.used_by.length > 0) {{
-                            html += '<div class="used-by-label">Required by</div>';
-                            html += '<ul class="used-by-list">';
-                            res.used_by.forEach(u => {{
-                                html += '<li>' + escapeHtml(u.type) + ': <strong>'
-                                      + escapeHtml(u.name) + '</strong>'
-                                      + ' <span class="dep-resource-meta">(ID ' + u.id + ')</span>'
-                                      + '</li>';
-                            }});
-                            html += '</ul>';
-                        }}
-                        html += '</li>';
-                    }});
-                    html += '</ul>';
-                    html += '</div>';
-                }});
-
-                // Migration order hint
-                html += '<div style="margin-top: 18px; padding: 14px 18px; background: #eff6ff; '
-                     + 'border-left: 3px solid #3b82f6; border-radius: 4px;">';
-                html += '<div style="font-weight: 600; color: #1e40af; margin-bottom: 6px;">Recommended migration order:</div>';
-                html += '<ol style="padding-left: 22px; color: #1e40af;">';
-                org.required_before.forEach(name => {{
-                    html += '<li><code>aap-bridge migrate -o &quot;' + escapeHtml(name) + '&quot;</code></li>';
-                }});
-                html += '<li><code>aap-bridge migrate -o &quot;' + escapeHtml(org.name) + '&quot;</code></li>';
-                html += '</ol>';
-                html += '</div>';
-            }}
-
-            html += '</div>';
-            return html;
-        }}
-
-        function toggleDepBlock(id) {{
-            const block = document.getElementById(id);
-            const toggle = document.getElementById(id + '-toggle');
-            const isOpen = block.classList.toggle('open');
-            toggle.textContent = isOpen ? '▾' : '▸';
-        }}
-    </script>
-</body>
-</html>"""
+    Returns:
+        Complete HTML string with embedded CSS/JS
+    """
+    return render_dependency_html(build_view_model(report), risk_report)
